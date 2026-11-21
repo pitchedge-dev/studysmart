@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
           })),
           maxTokens: 2048,
           maxRetries: 0,
+          abortSignal: AbortSignal.timeout(20000),
         });
         return NextResponse.json({ reply: text });
       } catch (err) {

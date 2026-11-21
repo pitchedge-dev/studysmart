@@ -58,7 +58,10 @@ export function isOverloadedError(err: unknown): boolean {
     text.includes("resource exhausted") ||
     text.includes("high demand") ||
     text.includes("too many requests") ||
-    text.includes("unavailable")
+    text.includes("unavailable") ||
+    text.includes("abort") ||
+    text.includes("timed out") ||
+    text.includes("timeout")
   );
 }
 

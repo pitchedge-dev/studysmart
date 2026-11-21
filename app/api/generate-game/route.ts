@@ -105,8 +105,9 @@ export async function POST(req: NextRequest) {
           schema: GameSchema,
           system: `You are StudySMART's Battle Arena game generator. ${topicHint}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
           prompt: `Topic / notes to build the game from:\n\n${topicOrNotes}`,
-          maxTokens: 4096,
+          maxTokens: 3072,
           maxRetries: 0,
+          abortSignal: AbortSignal.timeout(20000),
         });
 
         return NextResponse.json({

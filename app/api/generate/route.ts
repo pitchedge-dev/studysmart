@@ -357,13 +357,14 @@ export async function POST(req: NextRequest) {
 
     // Walk the model fallback chain. Each model is tried at most once per
     // shape — retrying the same overloaded model just burns its free quota.
-    // At most 4 generation attempts total, so the request stays inside the
-    // function timeout. A real guide in the simpler shape beats a 500.
+    // Each attempt is capped at 20s (the free-tier models can stall under
+    // load) and the whole loop at 3 attempts, so the request stays inside
+    // the 60s function timeout. A real guide in the simpler shape beats a 500.
     const simplePrompt = `${systemPrompt} IMPORTANT — simplified shape for this attempt: return at most 2 modules with at most 3 concepts each, concept cards with targeted practice only. Do NOT include a checkpoint, a reasoning example, or core ideas in this attempt. Keep everything short.`;
     let lastErr: unknown = null;
     let attempts = 0;
     for (const model of models) {
-      if (attempts >= 4) break;
+      if (attempts >= 3) break;
       try {
         attempts += 1;
         const { object } = await generateObject({
@@ -371,8 +372,9 @@ export async function POST(req: NextRequest) {
           schema: GenerateResultSchema,
           system: systemPrompt,
           messages: [{ role: "user", content }],
-          maxTokens: 4096,
+          maxTokens: 3072,
           maxRetries: 0,
+          abortSignal: AbortSignal.timeout(20000),
         });
         return NextResponse.json({
           topicType: object.topicType,
@@ -387,7 +389,7 @@ export async function POST(req: NextRequest) {
         lastErr = fullErr;
         logError("[/api/generate] full-shape attempt failed:", fullErr);
         if (isOverloadedError(fullErr)) continue;
-        if (attempts >= 4) break;
+        if (attempts >= 3) break;
         try {
           attempts += 1;
           const { object } = await generateObject({
@@ -395,8 +397,9 @@ export async function POST(req: NextRequest) {
             schema: SimpleGenerateResultSchema,
             system: simplePrompt,
             messages: [{ role: "user", content }],
-            maxTokens: 3072,
+            maxTokens: 2048,
             maxRetries: 0,
+            abortSignal: AbortSignal.timeout(20000),
           });
           return NextResponse.json({
             topicType: object.topicType,
