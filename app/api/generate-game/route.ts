@@ -21,18 +21,43 @@ const GameQuestionSchema = z.object({
     .describe("Points awarded for a correct answer (100-500 based on difficulty)."),
 });
 
+const GameCardSchema = z.object({
+  front: z.string().describe("The front of a flashcard or matching card, taken from the supplied material."),
+  back: z.string().describe("The back of the card — the match for the front, taken from the supplied material."),
+});
+
 const GameSchema = z.object({
-  title: z.string().describe("A short, engaging title for this trivia game, derived from the supplied topic/notes."),
-  questions: z.array(GameQuestionSchema).describe("The trivia questions."),
+  title: z.string().describe("A short, engaging title for this game, derived from the supplied topic/notes."),
+  gameType: z
+    .string()
+    .describe(
+      "The game type chosen for this topic, derived from the supplied material: for example a timed speed drill, a matching game, flashcards, or a quiz race. Choose the type that fits the topic."
+    ),
+  gameDescription: z
+    .string()
+    .describe("One line describing how this game is played, derived from the supplied material."),
+  timedSecondsPerQuestion: z
+    .number()
+    .int()
+    .optional()
+    .describe("Seconds allowed per question, only when the chosen game type is timed. Omit otherwise."),
+  cards: z
+    .array(GameCardSchema)
+    .optional()
+    .describe(
+      "Front/back cards for matching or flashcard games, taken from the supplied material. Include only when the chosen game type uses cards."
+    ),
+  questions: z.array(GameQuestionSchema).describe("The game questions."),
 });
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { topicOrNotes, playerCount, questionCount } = body as {
+    const { topicOrNotes, playerCount, questionCount, topicType } = body as {
       topicOrNotes?: string;
       playerCount?: number;
       questionCount?: number;
+      topicType?: string;
     };
 
     if (typeof topicOrNotes !== "string" || topicOrNotes.trim().length === 0) {
@@ -57,15 +82,24 @@ export async function POST(req: NextRequest) {
         ? Math.min(Math.floor(playerCount), 8)
         : 1;
 
+    const topicHint =
+      typeof topicType === "string" && topicType.trim()
+        ? `The supplied material was classified as: ${topicType.trim()}. `
+        : "";
+
     const { object } = await generateObject({
       model,
       schema: GameSchema,
-      system: `You are StudySMART's Battle Arena game generator. Create a fun, fair trivia game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add example topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty.`,
-      prompt: `Topic / notes to build the trivia game from:\n\n${topicOrNotes}`,
+      system: `You are StudySMART's Battle Arena game generator. ${topicHint}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
+      prompt: `Topic / notes to build the game from:\n\n${topicOrNotes}`,
     });
 
     return NextResponse.json({
       title: object.title,
+      gameType: object.gameType,
+      gameDescription: object.gameDescription,
+      timedSecondsPerQuestion: object.timedSecondsPerQuestion,
+      cards: object.cards ?? [],
       questions: object.questions,
     });
   } catch (err) {

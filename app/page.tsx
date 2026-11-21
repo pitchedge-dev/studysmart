@@ -22,6 +22,10 @@ import {
 } from "lucide-react";
 import TutorPanel from "@/components/TutorPanel";
 import BattleArena from "@/components/BattleArena";
+import TargetedPractice, { type StudyModule } from "@/components/TargetedPractice";
+import Pronunciation from "@/components/Pronunciation";
+import ShowYourReasoning from "@/components/ShowYourReasoning";
+import SectionCheckpoint from "@/components/SectionCheckpoint";
 
 const Sketchpad = dynamic(() => import("@/components/Sketchpad"), {
   ssr: false,
@@ -40,8 +44,12 @@ type QuizQuestion = {
 };
 
 type GenerateResult = {
+  topicType?: string;
+  languageCode?: string;
+  guideTitle?: string;
   studyGuide: string;
   keyConcepts: string[];
+  modules?: StudyModule[];
   quiz?: QuizQuestion[];
 };
 
@@ -107,6 +115,9 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || "Failed to generate study material.");
       setResult(data as GenerateResult);
       setAnswers({});
+      setPracticeProgress({ answered: 0, correct: 0 });
+      setCheckpointByModule({});
+      setBestScores({});
       setTab("guide");
       setWorkspaceOpen(false);
     } catch (e) {
@@ -153,6 +164,62 @@ export default function Home() {
     setTutorTitle("Why was this answer wrong?");
     setTutorOpen(true);
   }
+
+  function openPracticeTutor(args: {
+    question: string;
+    picked: string;
+    correctAnswer: string;
+    explanation: string;
+    conceptTitle: string;
+  }) {
+    setTutorContext(
+      `The student is working on the concept "${args.conceptTitle}". The practice problem was: "${args.question}". The correct answer is "${args.correctAnswer}" but the student answered "${args.picked}". The explanation given was: "${args.explanation}". Give a step-by-step breakdown of why the student's answer is wrong and how to reach the correct answer.`
+    );
+    setTutorTitle("Why was this answer wrong?");
+    setTutorOpen(true);
+  }
+
+  const modules = result?.modules ?? [];
+  const totalCards = modules.reduce((n, m) => n + m.concepts.length, 0);
+  const totalPracticeProblems = modules.reduce(
+    (n, m) => n + m.practice.reduce((a, g) => a + g.problems.length, 0),
+    0
+  );
+  const totalCheckpointQuestions = modules.reduce(
+    (n, m) => n + (m.checkpoint?.questions.length ?? 0),
+    0
+  );
+  let cardIndex = 0;
+
+  // Live progress, kept in local state only and saved automatically as you work.
+  const [practiceProgress, setPracticeProgress] = useState({
+    answered: 0,
+    correct: 0,
+  });
+  const [checkpointByModule, setCheckpointByModule] = useState<
+    Record<number, { answered: number; correct: number }>
+  >({});
+  const checkpointProgress = Object.values(checkpointByModule).reduce(
+    (acc, v) => ({ answered: acc.answered + v.answered, correct: acc.correct + v.correct }),
+    { answered: 0, correct: 0 }
+  );
+  const [bestScores, setBestScores] = useState<Record<number, number>>({});
+  const bestTestScore =
+    Object.values(bestScores).length > 0
+      ? Math.max(...Object.values(bestScores))
+      : null;
+  const guideContentForGame = result
+    ? [
+        result.studyGuide,
+        ...modules.flatMap((m) => [
+          `Module ${m.moduleNumber}: ${m.title}`,
+          ...(m.coreIdeas ?? []),
+          ...m.concepts.map(
+            (c) => `${c.title}: ${c.formulaOrDefinition}. Example: ${c.example}`
+          ),
+        ]),
+      ].join("\n")
+    : "";
 
   const quiz = result?.quiz ?? [];
   const answeredCount = Object.keys(answers).length;
@@ -344,6 +411,189 @@ export default function Home() {
 
           {tab === "guide" && (
             <div className="mt-4 space-y-4">
+              {result.guideTitle && (
+                <h1 className="text-2xl font-bold tracking-tight">
+                  {result.guideTitle}
+                </h1>
+              )}
+              {result.topicType && (
+                <p className="text-sm text-slate-500">
+                  Topic type: {result.topicType}
+                </p>
+              )}
+
+              {modules.length > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <p className="text-3xl font-bold">{totalCards}</p>
+                      <p className="text-sm text-slate-500">Topics to master</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold">
+                        {practiceProgress.correct + checkpointProgress.correct}/
+                        {totalPracticeProblems + totalCheckpointQuestions} · Your
+                        progress
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Saved automatically · Best test score:{" "}
+                        {bestTestScore === null ? "—" : `${bestTestScore}/10`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full bg-brand-500 transition-all"
+                      style={{
+                        width: `${
+                          totalPracticeProblems + totalCheckpointQuestions
+                            ? ((practiceProgress.answered + checkpointProgress.answered) /
+                                (totalPracticeProblems + totalCheckpointQuestions)) *
+                              100
+                            : 0
+                        }%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {modules.length > 0 &&
+                modules.map((mod) => {
+                  const isVocabulary =
+                    (mod.format ?? "").toLowerCase().includes("vocab");
+                  const isCoreIdeas =
+                    (mod.format ?? "").toLowerCase().includes("core");
+                  const conceptCards = (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {mod.concepts.map((concept) => {
+                        cardIndex += 1;
+                        const thisCard = cardIndex;
+                        return (
+                          <article
+                            key={`${mod.moduleNumber}-${concept.title}`}
+                            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700">
+                                {concept.label}
+                              </span>
+                              <span className="text-xs text-slate-400">
+                                Card {thisCard} of {totalCards}
+                              </span>
+                            </div>
+                            <h3 className="mt-3 text-lg font-bold">
+                              {concept.title}
+                            </h3>
+                            {concept.translation && (
+                              <p className="mt-1 text-base font-medium text-slate-700">
+                                {concept.translation}
+                              </p>
+                            )}
+                            {concept.category && (
+                              <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+                                {concept.category}
+                              </p>
+                            )}
+                            <p className="mt-2 font-mono text-sm font-medium text-slate-800">
+                              {concept.formulaOrDefinition}
+                            </p>
+                            <p className="mt-2 text-sm text-slate-600">
+                              <strong>Example:</strong> {concept.example}
+                            </p>
+                            {(concept.pronunciation || isVocabulary) && (
+                              <Pronunciation
+                                term={concept.title}
+                                pronunciation={concept.pronunciation}
+                                languageCode={result.languageCode}
+                              />
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  );
+                  const coreIdeas = mod.coreIdeas && mod.coreIdeas.length > 0 && (
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <h3 className="font-semibold">Core ideas</h3>
+                      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
+                        {mod.coreIdeas.map((idea, i) => (
+                          <li key={i}>{idea}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  );
+                  return (
+                    <div key={mod.moduleNumber} className="space-y-4">
+                      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                            Module {mod.moduleNumber}
+                            {mod.format ? ` · ${mod.format}` : ""}
+                          </p>
+                          {isVocabulary && (
+                            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+                              Spotlight
+                            </span>
+                          )}
+                        </div>
+                        <h2 className="mt-1 text-xl font-bold">{mod.title}</h2>
+                        {mod.intro && (
+                          <p className="mt-1 text-sm text-slate-500">{mod.intro}</p>
+                        )}
+                      </div>
+
+                      {isCoreIdeas ? (
+                        <>
+                          {coreIdeas}
+                          {conceptCards}
+                        </>
+                      ) : (
+                        <>
+                          {conceptCards}
+                          {coreIdeas}
+                        </>
+                      )}
+
+                      {mod.reasoningExample && (
+                        <ShowYourReasoning example={mod.reasoningExample} />
+                      )}
+
+                      {mod.checkpoint && (
+                        <SectionCheckpoint
+                          moduleTitle={mod.title}
+                          questions={mod.checkpoint.questions}
+                          onProgress={(answered, correct) =>
+                            setCheckpointByModule((prev) => ({
+                              ...prev,
+                              [mod.moduleNumber]: { answered, correct },
+                            }))
+                          }
+                          onFinish={(score) =>
+                            setBestScores((prev) => ({
+                              ...prev,
+                              [mod.moduleNumber]: Math.max(
+                                prev[mod.moduleNumber] ?? 0,
+                                score
+                              ),
+                            }))
+                          }
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+
+              {modules.length > 0 && (
+                <TargetedPractice
+                  modules={modules}
+                  onAskTutor={openPracticeTutor}
+                  onProgress={(answered, correct) =>
+                    setPracticeProgress({ answered, correct })
+                  }
+                />
+              )}
+
               {result.keyConcepts.length > 0 && (
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <h2 className="text-sm font-semibold text-slate-700">
@@ -528,7 +778,11 @@ export default function Home() {
 
           {tab === "arena" && (
             <div className="mt-4">
-              <BattleArena />
+              <BattleArena
+                guideTopic={result.guideTitle}
+                guideContent={guideContentForGame}
+                topicType={result.topicType}
+              />
             </div>
           )}
         </section>
