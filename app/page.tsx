@@ -62,6 +62,8 @@ export default function Home() {
   const [images, setImages] = useState<string[]>([]);
   const [includeQuiz, setIncludeQuiz] = useState(true);
   const [extractConcepts, setExtractConcepts] = useState(true);
+  const [educationLevel, setEducationLevel] = useState("");
+  const [testTiming, setTestTiming] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -112,6 +114,8 @@ export default function Home() {
           images,
           includeQuiz,
           extractConcepts,
+          educationLevel: educationLevel || undefined,
+          testTiming: testTiming || undefined,
         }),
       });
       const data = await res.json();
@@ -321,6 +325,64 @@ export default function Home() {
             placeholder="What do you want to learn today? Paste your notes, upload an image, or type a topic"
             className="input mt-3 min-h-32 resize-y leading-relaxed"
           />
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="education-level"
+                className="text-sm font-bold tracking-tight text-ink-900"
+              >
+                Education level
+              </label>
+              <select
+                id="education-level"
+                value={educationLevel}
+                onChange={(e) => setEducationLevel(e.target.value)}
+                className="input mt-1.5"
+              >
+                <option value="" disabled>
+                  Choose your level…
+                </option>
+                <option value="Elementary School">Elementary School</option>
+                <option value="Middle School">Middle School</option>
+                <option value="High School">High School</option>
+                <option value="College / University">College / University</option>
+                <option value="Adult learning">Adult learning</option>
+              </select>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                The guide is written at the right level for you.
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="test-timing"
+                className="text-sm font-bold tracking-tight text-ink-900"
+              >
+                When is your test?
+              </label>
+              <select
+                id="test-timing"
+                value={testTiming}
+                onChange={(e) => setTestTiming(e.target.value)}
+                className="input mt-1.5"
+              >
+                <option value="" disabled>
+                  Choose when your test is…
+                </option>
+                <option value="Today">Today</option>
+                <option value="Tomorrow">Tomorrow</option>
+                <option value="In 2–3 days">In 2–3 days</option>
+                <option value="In a week">In a week</option>
+                <option value="In 2+ weeks">In 2+ weeks</option>
+                <option value="No test — just learning">
+                  No test — just learning
+                </option>
+              </select>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                Closer tests get a shorter, high-yield guide.
+              </p>
+            </div>
+          </div>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <input
@@ -901,6 +963,14 @@ export default function Home() {
             nothing is pre-filled.
           </p>
         </div>
+      )}
+
+      {/* Standalone Battle Arena — no study guide needed. Play a game from
+          any topic or notes, straight from the landing page. */}
+      {!result && !loading && (
+        <section className="mt-6 animate-fade-up">
+          <BattleArena />
+        </section>
       )}
 
       {/* Global floating AI Study Assistant */}
