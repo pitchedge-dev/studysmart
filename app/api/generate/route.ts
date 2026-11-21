@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, MISSING_KEY_MESSAGE, safeErrorDetail } from "@/lib/gemini";
+import {
+  getModels,
+  isOverloadedError,
+  MISSING_KEY_MESSAGE,
+  OVERLOADED_MESSAGE,
+  safeErrorDetail,
+} from "@/lib/gemini";
+
+// Vercel Hobby functions are killed after a short default timeout; allow the
+// full 60s so a real generation can finish instead of dying mid-stream.
+export const maxDuration = 60;
 
 // ---------------------------------------------------------------------------
 // Schemas — deliberately loosened where the model used to trip validation.
@@ -132,8 +142,8 @@ const ModuleSchema = z.object({
   concepts: z
     .array(ConceptSchema)
     .min(1)
-    .max(4)
-    .describe("The concepts in this module, in learning order, taken from the supplied material. At most 4."),
+    .max(3)
+    .describe("The concepts in this module, in learning order, taken from the supplied material. At most 3."),
   coreIdeas: z
     .array(z.string())
     .min(1)
@@ -188,9 +198,9 @@ const GenerateResultSchema = z.object({
     ),
   quiz: z
     .array(QuizQuestionSchema)
-    .max(8)
+    .max(6)
     .optional()
-    .describe("Multiple-choice practice questions, only when a quiz was requested. At most 8."),
+    .describe("Multiple-choice practice questions, only when a quiz was requested. At most 6."),
 });
 
 // Simplified fallback shape, used once if the full shape fails to validate:
@@ -201,7 +211,7 @@ const SimpleModuleSchema = z.object({
   title: z.string(),
   intro: z.string(),
   format: z.string().optional(),
-  concepts: z.array(ConceptSchema).min(1).max(4),
+  concepts: z.array(ConceptSchema).min(1).max(3),
   practice: z.array(PracticeGroupSchema),
 });
 
@@ -212,7 +222,7 @@ const SimpleGenerateResultSchema = z.object({
   keyConcepts: z.array(z.string()),
   languageCode: z.string().optional(),
   modules: z.array(SimpleModuleSchema).min(1).max(2),
-  quiz: z.array(QuizQuestionSchema).max(8).optional(),
+  quiz: z.array(QuizQuestionSchema).max(6).optional(),
 });
 
 const EDUCATION_LEVELS = [
@@ -303,8 +313,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const model = getModel();
-    if (!model) {
+    const models = getModels();
+    if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
 
@@ -320,7 +330,7 @@ export async function POST(req: NextRequest) {
         : undefined;
 
     const quizInstruction = includeQuiz
-      ? "Also create multiple-choice practice questions (three or four options each) covering the material — at most 8, one per major concept — each with the correct answer and a detailed explanation."
+      ? "Also create multiple-choice practice questions (three or four options each) covering the material — at most 6, one per major concept — each with the correct answer and a detailed explanation."
       : "Do not include a quiz.";
     const conceptsInstruction = extractConcepts
       ? "Extract the key concepts as a short list of concise terms or phrases."
@@ -329,7 +339,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join(" ");
 
-    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} Organise the material into at most 2 modules, with at most 4 concepts per module. Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with up to three problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, and one worked example; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Keep the whole response compact enough to fit: short explanations, short examples, short practice questions.`;
+    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} Organise the material into at most 2 modules, with at most 3 concepts per module, and include at most one checkpoint in the whole guide. Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with up to three problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, and one worked example; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Keep the whole response compact enough to fit: short explanations, short examples, short practice questions.`;
 
     const textPart = hasText
       ? `User-supplied material:\n\n${text}`
@@ -345,60 +355,77 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Attempt 1: the full adaptive shape, with a generous output budget and
-    // one built-in retry on transient/validation failures.
-    try {
-      const { object } = await generateObject({
-        model,
-        schema: GenerateResultSchema,
-        system: systemPrompt,
-        messages: [{ role: "user", content }],
-        maxTokens: 8192,
-        maxRetries: 2,
-      });
-
-      return NextResponse.json({
-        topicType: object.topicType,
-        languageCode: object.languageCode,
-        guideTitle: object.guideTitle,
-        studyGuide: object.studyGuide,
-        keyConcepts: object.keyConcepts ?? [],
-        modules: object.modules ?? [],
-        quiz: includeQuiz ? object.quiz ?? [] : undefined,
-      });
-    } catch (fullErr) {
-      logError("[/api/generate] full-shape attempt failed, trying simplified shape:", fullErr);
-
-      // Attempt 2: simplified shape (concepts + practice only). A real guide
-      // in the simpler shape beats a 500.
-      const simplePrompt = `${systemPrompt} IMPORTANT — simplified shape for this attempt: return at most 2 modules with at most 4 concepts each, concept cards with targeted practice only. Do NOT include a checkpoint, a reasoning example, or core ideas in this attempt. Keep everything short.`;
+    // Walk the model fallback chain. Each model is tried at most once per
+    // shape — retrying the same overloaded model just burns its free quota.
+    // At most 4 generation attempts total, so the request stays inside the
+    // function timeout. A real guide in the simpler shape beats a 500.
+    const simplePrompt = `${systemPrompt} IMPORTANT — simplified shape for this attempt: return at most 2 modules with at most 3 concepts each, concept cards with targeted practice only. Do NOT include a checkpoint, a reasoning example, or core ideas in this attempt. Keep everything short.`;
+    let lastErr: unknown = null;
+    let attempts = 0;
+    for (const model of models) {
+      if (attempts >= 4) break;
       try {
+        attempts += 1;
         const { object } = await generateObject({
           model,
-          schema: SimpleGenerateResultSchema,
-          system: simplePrompt,
+          schema: GenerateResultSchema,
+          system: systemPrompt,
           messages: [{ role: "user", content }],
-          maxTokens: 8192,
-          maxRetries: 1,
+          maxTokens: 4096,
+          maxRetries: 0,
         });
-
         return NextResponse.json({
           topicType: object.topicType,
           languageCode: object.languageCode,
           guideTitle: object.guideTitle,
           studyGuide: object.studyGuide,
           keyConcepts: object.keyConcepts ?? [],
-          modules: (object.modules ?? []).map((m) => ({
-            ...m,
-            format: m.format ?? "mixed",
-          })),
+          modules: object.modules ?? [],
           quiz: includeQuiz ? object.quiz ?? [] : undefined,
         });
-      } catch (simpleErr) {
-        logError("[/api/generate] simplified-shape attempt also failed:", simpleErr);
-        throw simpleErr;
+      } catch (fullErr) {
+        lastErr = fullErr;
+        logError("[/api/generate] full-shape attempt failed:", fullErr);
+        if (isOverloadedError(fullErr)) continue;
+        if (attempts >= 4) break;
+        try {
+          attempts += 1;
+          const { object } = await generateObject({
+            model,
+            schema: SimpleGenerateResultSchema,
+            system: simplePrompt,
+            messages: [{ role: "user", content }],
+            maxTokens: 3072,
+            maxRetries: 0,
+          });
+          return NextResponse.json({
+            topicType: object.topicType,
+            languageCode: object.languageCode,
+            guideTitle: object.guideTitle,
+            studyGuide: object.studyGuide,
+            keyConcepts: object.keyConcepts ?? [],
+            modules: (object.modules ?? []).map((m) => ({
+              ...m,
+              format: m.format ?? "mixed",
+            })),
+            quiz: includeQuiz ? object.quiz ?? [] : undefined,
+          });
+        } catch (simpleErr) {
+          lastErr = simpleErr;
+          logError("[/api/generate] simplified-shape attempt failed:", simpleErr);
+          continue;
+        }
       }
     }
+
+    // Every model in the chain failed.
+    if (isOverloadedError(lastErr)) {
+      return NextResponse.json(
+        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { status: 503 }
+      );
+    }
+    throw lastErr;
   } catch (err) {
     logError("[/api/generate] error:", err);
     return NextResponse.json(

@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, MISSING_KEY_MESSAGE, safeErrorDetail } from "@/lib/gemini";
+import {
+  getModels,
+  isOverloadedError,
+  MISSING_KEY_MESSAGE,
+  OVERLOADED_MESSAGE,
+  safeErrorDetail,
+} from "@/lib/gemini";
+
+export const maxDuration = 60;
 
 const GameQuestionSchema = z.object({
   question: z.string().describe("The trivia question text."),
@@ -67,8 +75,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const model = getModel();
-    if (!model) {
+    const models = getModels();
+    if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
 
@@ -87,21 +95,42 @@ export async function POST(req: NextRequest) {
         ? `The supplied material was classified as: ${topicType.trim()}. `
         : "";
 
-    const { object } = await generateObject({
-      model,
-      schema: GameSchema,
-      system: `You are StudySMART's Battle Arena game generator. ${topicHint}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
-      prompt: `Topic / notes to build the game from:\n\n${topicOrNotes}`,
-    });
+    // Walk the model fallback chain — each model tried at most once, so an
+    // overloaded model does not burn its free quota on retries.
+    let lastErr: unknown = null;
+    for (const model of models) {
+      try {
+        const { object } = await generateObject({
+          model,
+          schema: GameSchema,
+          system: `You are StudySMART's Battle Arena game generator. ${topicHint}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
+          prompt: `Topic / notes to build the game from:\n\n${topicOrNotes}`,
+          maxTokens: 4096,
+          maxRetries: 0,
+        });
 
-    return NextResponse.json({
-      title: object.title,
-      gameType: object.gameType,
-      gameDescription: object.gameDescription,
-      timedSecondsPerQuestion: object.timedSecondsPerQuestion,
-      cards: object.cards ?? [],
-      questions: object.questions,
-    });
+        return NextResponse.json({
+          title: object.title,
+          gameType: object.gameType,
+          gameDescription: object.gameDescription,
+          timedSecondsPerQuestion: object.timedSecondsPerQuestion,
+          cards: object.cards ?? [],
+          questions: object.questions,
+        });
+      } catch (err) {
+        lastErr = err;
+        console.error("[/api/generate-game] attempt failed:", err);
+        if (!isOverloadedError(err)) break;
+      }
+    }
+
+    if (isOverloadedError(lastErr)) {
+      return NextResponse.json(
+        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { status: 503 }
+      );
+    }
+    throw lastErr;
   } catch (err) {
     console.error("[/api/generate-game] error:", err);
     return NextResponse.json(

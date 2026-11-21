@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
-import { getModel, MISSING_KEY_MESSAGE, safeErrorDetail } from "@/lib/gemini";
+import {
+  getModels,
+  isOverloadedError,
+  MISSING_KEY_MESSAGE,
+  OVERLOADED_MESSAGE,
+  safeErrorDetail,
+} from "@/lib/gemini";
+
+export const maxDuration = 60;
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -20,8 +28,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const model = getModel();
-    if (!model) {
+    const models = getModels();
+    if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
 
@@ -37,16 +45,35 @@ export async function POST(req: NextRequest) {
 
     const system = `You are StudySMART's AI Tutor, a patient and encouraging study assistant. ${guideContext}${extraContext} Answer clearly and accurately, grounded in the study guide and supplied context above. When asked to rewrite a section, return the rewritten section in Markdown. When explaining a wrong quiz answer, explain why the chosen answer is incorrect and why the correct answer is right, without simply restating the answer. Never invent study material or topics beyond what the user has supplied.`;
 
-    const { text } = await generateText({
-      model,
-      system,
-      messages: messages.map((m) => ({
-        role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
-        content: m.content,
-      })),
-    });
+    // Walk the model fallback chain — each model tried at most once.
+    let lastErr: unknown = null;
+    for (const model of models) {
+      try {
+        const { text } = await generateText({
+          model,
+          system,
+          messages: messages.map((m) => ({
+            role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+            content: m.content,
+          })),
+          maxTokens: 2048,
+          maxRetries: 0,
+        });
+        return NextResponse.json({ reply: text });
+      } catch (err) {
+        lastErr = err;
+        console.error("[/api/chat] attempt failed:", err);
+        if (!isOverloadedError(err)) break;
+      }
+    }
 
-    return NextResponse.json({ reply: text });
+    if (isOverloadedError(lastErr)) {
+      return NextResponse.json(
+        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { status: 503 }
+      );
+    }
+    throw lastErr;
   } catch (err) {
     console.error("[/api/chat] error:", err);
     return NextResponse.json(
