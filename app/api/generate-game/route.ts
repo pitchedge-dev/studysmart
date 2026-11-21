@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, MISSING_KEY_MESSAGE } from "@/lib/gemini";
+import { getModel, MISSING_KEY_MESSAGE, safeErrorDetail } from "@/lib/gemini";
 
 const GameQuestionSchema = z.object({
   question: z.string().describe("The trivia question text."),
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[/api/generate-game] error:", err);
     return NextResponse.json(
-      { error: "Failed to generate the game. Please try again." },
+      { error: "Failed to generate the game. Please try again.", detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

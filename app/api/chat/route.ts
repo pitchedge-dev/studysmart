@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
-import { getModel, MISSING_KEY_MESSAGE } from "@/lib/gemini";
+import { getModel, MISSING_KEY_MESSAGE, safeErrorDetail } from "@/lib/gemini";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[/api/chat] error:", err);
     return NextResponse.json(
-      { error: "The tutor could not respond. Please try again." },
+      { error: "The tutor could not respond. Please try again.", detail: safeErrorDetail(err) },
       { status: 500 }
     );
   }

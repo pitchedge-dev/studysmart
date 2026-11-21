@@ -119,7 +119,10 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to generate study material.");
+      if (!res.ok)
+        throw new Error(
+          data.detail ? `${data.error || "Failed to generate study material."} (${data.detail})` : data.error || "Failed to generate study material."
+        );
       setResult(data as GenerateResult);
       setAnswers({});
       setPracticeProgress({ answered: 0, correct: 0 });

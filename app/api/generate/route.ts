@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, MISSING_KEY_MESSAGE } from "@/lib/gemini";
+import { getModel, MISSING_KEY_MESSAGE, safeErrorDetail } from "@/lib/gemini";
 
 // ---------------------------------------------------------------------------
 // Schemas — deliberately loosened where the model used to trip validation.
@@ -402,7 +402,10 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     logError("[/api/generate] error:", err);
     return NextResponse.json(
-      { error: "Failed to generate study material. Please try again." },
+      {
+        error: "Failed to generate study material. Please try again.",
+        detail: safeErrorDetail(err),
+      },
       { status: 500 }
     );
   }

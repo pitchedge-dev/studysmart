@@ -19,3 +19,10 @@ export function getModel() {
 
 export const MISSING_KEY_MESSAGE =
   "GOOGLE_GENERATIVE_AI_API_KEY is not configured. Add your free Google AI Studio key to the environment to generate content.";
+
+/** Safe one-line error detail for API responses: the provider's message,
+ *  truncated, with anything resembling an API key stripped out. */
+export function safeErrorDetail(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.replace(/AIza[0-9A-Za-z_-]{10,}/g, "[key]").slice(0, 300);
+}
