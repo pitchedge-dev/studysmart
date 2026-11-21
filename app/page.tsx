@@ -17,12 +17,14 @@ import {
   Library,
   Lightbulb,
   Loader2,
+  Menu,
   MessageSquareHeart,
   Pencil,
   Sparkles,
   Swords,
   Upload,
   User,
+  Users,
   Wand2,
   X,
   XCircle,
@@ -40,7 +42,9 @@ import Browse from "@/components/Browse";
 import Friends, { type FriendEntry } from "@/components/Friends";
 import {
   getMyProfile,
+  getProfilesByIds,
   getSupabase,
+  listFriendships,
   saveGuideToAccount,
   type AppUser,
   type Profile,
@@ -74,7 +78,17 @@ export type GenerateResult = {
   quiz?: QuizQuestion[];
 };
 
-type Tab = "guide" | "quiz" | "arena" | "my-guides" | "browse";
+type Section = "generate" | "my-guides" | "browse" | "arena" | "friends";
+type ResultView = "guide" | "quiz";
+
+/** The top nav bar is the section navigation — one section at a time. */
+const NAV_LINKS: { id: Section; label: string; icon: typeof Wand2 }[] = [
+  { id: "generate", label: "Generate", icon: Wand2 },
+  { id: "my-guides", label: "Your Study Guides", icon: Library },
+  { id: "browse", label: "Browse", icon: Globe },
+  { id: "arena", label: "Battle Arena", icon: Swords },
+  { id: "friends", label: "Friends", icon: Users },
+];
 
 type UploadedFile = {
   name: string;
@@ -108,7 +122,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
-  const [tab, setTab] = useState<Tab>("browse");
+  const [section, setSection] = useState<Section>("generate");
+  const [resultView, setResultView] = useState<ResultView>("guide");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
@@ -142,6 +158,14 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Switching sections never clears the input or the generated guide —
+  // all of that state lives here and survives the switch.
+  function goToSection(next: Section) {
+    setSection(next);
+    setMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   // ---- Account session -------------------------------------------------
   async function refreshAuth() {
     const sb = getSupabase();
@@ -168,6 +192,38 @@ export default function Home() {
     return () => listener.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the accepted-friends list loaded for Your Study Guides'
+  // send-to-friend dropdown, even when the Friends section is not on screen.
+  useEffect(() => {
+    if (!user) {
+      setFriends([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const list = await listFriendships(user.id);
+      const ids = list.flatMap((r) => [r.requester_id, r.addressee_id]);
+      const found = await getProfilesByIds([...new Set(ids)]);
+      const byId: Record<string, Profile> = {};
+      for (const p of found) byId[p.user_id] = p;
+      if (cancelled) return;
+      setFriends(
+        list
+          .filter((r) => r.status === "accepted")
+          .map((r) => ({
+            friendshipId: r.id,
+            profile:
+              byId[
+                r.requester_id === user.id ? r.addressee_id : r.requester_id
+              ] ?? null,
+          }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // ---- Guide navigation: which module is on screen + back-to-top -------
   useEffect(() => {
@@ -349,7 +405,8 @@ export default function Home() {
       setBestScores({});
       setCollapsedModules({});
       setActiveModule(1);
-      setTab("guide");
+      setSection("generate");
+      setResultView("guide");
       setWorkspaceOpen(false);
       // Signed in? Save the guide to the account automatically.
       if (user) {
@@ -373,7 +430,8 @@ export default function Home() {
       setPracticeProgress({ answered: 0, correct: 0 });
       setCheckpointByModule({});
       setBestScores({});
-      setTab("guide");
+      setSection("generate");
+      setResultView("guide");
       setWorkspaceOpen(false);
       // Ask for feedback once per session, after the first guide lands —
       // never on the blank landing page, and never on every load.
@@ -400,14 +458,15 @@ export default function Home() {
     setBestScores({});
     setCollapsedModules({});
     setActiveModule(1);
-    setTab("guide");
+    setSection("generate");
+    setResultView("guide");
     setWorkspaceOpen(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function openGame(game: GameData, topic: string) {
     setSavedGame({ game, topic, key: Date.now() });
-    setTab("arena");
+    setSection("arena");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -512,44 +571,125 @@ export default function Home() {
   ).length;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-24 sm:px-6">
-      {/* Header */}
-      <header className="sticky top-0 z-30 -mx-4 border-b border-ink-100/70 bg-white/80 px-4 py-3 backdrop-blur-lg sm:-mx-6 sm:px-6">
-        <div className="mx-auto flex max-w-5xl items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow">
-            <GraduationCap className="h-6 w-6" />
-          </span>
-          <div className="min-w-0">
-            <h1 className="text-xl font-extrabold leading-tight tracking-tight">
-              Study<span className="gradient-text">SMART</span>
-            </h1>
-            <p className="hidden text-xs font-medium text-ink-400 sm:block">
-              Learn anything, smarter — powered by AI.
-            </p>
+    <div className="min-h-screen pb-24">
+      {/* Top navigation bar — the section navigation for the whole app */}
+      <header className="sticky top-0 z-50 border-b border-ink-100/70 bg-white/90 backdrop-blur-lg">
+        <div className="mx-auto flex max-w-5xl items-center gap-2 px-4 py-3 sm:px-6">
+          <button
+            type="button"
+            onClick={() => goToSection("generate")}
+            aria-label="StudySMART home"
+            className="flex shrink-0 items-center gap-2.5"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow">
+              <GraduationCap className="h-6 w-6" />
+            </span>
+            <span className="text-left">
+              <span className="block text-xl font-extrabold leading-tight tracking-tight">
+                Study<span className="gradient-text">SMART</span>
+              </span>
+              <span className="hidden text-xs font-medium text-ink-400 lg:block">
+                Learn anything, smarter — powered by AI.
+              </span>
+            </span>
+          </button>
+
+          <nav
+            aria-label="Sections"
+            className="ml-2 hidden items-center gap-1 md:flex"
+          >
+            {NAV_LINKS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => goToSection(id)}
+                aria-current={section === id ? "page" : undefined}
+                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                  section === id
+                    ? "bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100"
+                    : "text-ink-500 hover:bg-ink-100/70 hover:text-ink-900"
+                }`}
+              >
+                <Icon className="h-4 w-4" /> {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAuthOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
+            >
+              <User className="h-3.5 w-3.5" />
+              <span className="max-w-24 truncate sm:max-w-none">
+                {user ? (profile?.display_name ?? "Account") : "Sign in"}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFeedbackOpen(true)}
+              className="hidden items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700 sm:inline-flex"
+            >
+              <MessageSquareHeart className="h-3.5 w-3.5" /> Give feedback
+            </button>
+            <span className="chip-amber hidden xl:inline-flex">
+              <Sparkles className="h-3.5 w-3.5" /> Generated on demand
+            </span>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+              className="inline-flex items-center justify-center rounded-full border border-ink-200 bg-white p-2 text-ink-600 shadow-sm transition hover:border-brand-300 hover:text-brand-700 md:hidden"
+            >
+              {menuOpen ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <Menu className="h-5 w-5" />
+              )}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setAuthOpen(true)}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
-          >
-            <User className="h-3.5 w-3.5" />
-            {profile?.display_name ?? "Account"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setFeedbackOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
-          >
-            <MessageSquareHeart className="h-3.5 w-3.5" /> Give feedback
-          </button>
-          <span className="chip-amber hidden sm:inline-flex">
-            <Sparkles className="h-3.5 w-3.5" /> Generated on demand
-          </span>
         </div>
+
+        {menuOpen && (
+          <nav
+            aria-label="Sections"
+            className="border-t border-ink-100 bg-white px-4 py-2 md:hidden"
+          >
+            {NAV_LINKS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => goToSection(id)}
+                aria-current={section === id ? "page" : undefined}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                  section === id
+                    ? "bg-brand-50 text-brand-700"
+                    : "text-ink-600 hover:bg-ink-100/70"
+                }`}
+              >
+                <Icon className="h-4 w-4" /> {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                setFeedbackOpen(true);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
+            >
+              <MessageSquareHeart className="h-4 w-4" /> Give feedback
+            </button>
+          </nav>
+        )}
       </header>
 
+      <main className="mx-auto max-w-5xl px-4 sm:px-6">
+
       {/* Hero */}
-      {!result && !loading && (
+      {section === "generate" && !result && !loading && (
         <div className="hero-glow animate-fade-up -mx-4 px-4 pb-2 pt-10 text-center sm:-mx-6 sm:px-6 sm:pt-14">
           <p className="chip mx-auto">
             <Brain className="h-3.5 w-3.5" /> Your notes in · A full study kit out
@@ -580,6 +720,7 @@ export default function Home() {
       )}
 
       {/* Create / Input view */}
+      {section === "generate" && (
       <section className="card animate-fade-up mt-6 overflow-hidden">
         <div className="h-1.5 w-full bg-gradient-to-r from-brand-500 via-brand-400 to-accent-400" />
         <div className="p-5 sm:p-7">
@@ -788,9 +929,10 @@ export default function Home() {
           )}
         </div>
       </section>
+      )}
 
       {/* Loading state */}
-      {loading && (
+      {section === "generate" && loading && (
         <div className="card animate-fade-up mt-6 flex flex-col items-center gap-3 py-14 text-center">
           <span className="flex h-16 w-16 animate-float items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow">
             <Brain className="h-8 w-8" />
@@ -815,29 +957,29 @@ export default function Home() {
         </div>
       )}
 
-      {/* Tabs — always visible: Study Guide / Quiz / Arena need a generated
-          guide, while Your Study Guides and Browse work any time. */}
-      {!loading && (
+      {/* Results — Study Guide / Practice Quiz live inside the Generate
+          section; the other destinations live in the top nav bar. */}
+      {section === "generate" && !loading && (
         <section className="mt-8 animate-fade-up">
+          {result && (
           <div className="flex flex-wrap gap-1.5 rounded-2xl bg-ink-100/70 p-1.5">
             <button
               type="button"
-              onClick={() => result && setTab("guide")}
-              disabled={!result}
+              onClick={() => setResultView("guide")}
               className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
-                tab === "guide"
+                resultView === "guide"
                   ? "bg-white text-brand-700 shadow-soft"
                   : "text-ink-500 hover:text-ink-800"
-              } ${!result ? "opacity-50" : ""}`}
+              }`}
             >
               <BookOpen className="h-4 w-4" /> Study Guide
             </button>
             {quiz.length > 0 && (
               <button
                 type="button"
-                onClick={() => setTab("quiz")}
+                onClick={() => setResultView("quiz")}
                 className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
-                  tab === "quiz"
+                  resultView === "quiz"
                     ? "bg-white text-brand-700 shadow-soft"
                     : "text-ink-500 hover:text-ink-800"
                 }`}
@@ -850,48 +992,15 @@ export default function Home() {
                 )}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setTab("arena")}
-              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
-                tab === "arena"
-                  ? "bg-white text-brand-700 shadow-soft"
-                  : "text-ink-500 hover:text-ink-800"
-              }`}
-            >
-              <Swords className="h-4 w-4" /> Battle Arena
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("my-guides")}
-              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
-                tab === "my-guides"
-                  ? "bg-white text-brand-700 shadow-soft"
-                  : "text-ink-500 hover:text-ink-800"
-              }`}
-            >
-              <Library className="h-4 w-4" /> Your Study Guides
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("browse")}
-              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
-                tab === "browse"
-                  ? "bg-white text-brand-700 shadow-soft"
-                  : "text-ink-500 hover:text-ink-800"
-              }`}
-            >
-              <Globe className="h-4 w-4" /> Browse
-            </button>
-          </div>
+          </div>)}
 
-          {tab === "guide" && !result && (
+          {!result && (
             <p className="card mt-6 p-5 text-sm leading-relaxed text-ink-500">
               Generate a study guide above and it will appear here.
             </p>
           )}
 
-          {tab === "guide" && result && (
+          {resultView === "guide" && result && (
             <div className="mt-6 space-y-5">
               {result.guideTitle && (
                 <div>
@@ -1319,7 +1428,7 @@ export default function Home() {
             </div>
           )}
 
-          {tab === "quiz" && (
+          {resultView === "quiz" && (
             <div className="mt-6 space-y-5">
               <div className="card p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1405,48 +1514,75 @@ export default function Home() {
             </div>
           )}
 
-          {tab === "arena" && (
-            <div className="mt-4">
-              <BattleArena
-                guideTopic={result?.guideTitle}
-                guideContent={result ? guideContentForGame : undefined}
-                topicType={result?.topicType}
-                user={user}
-                initialGame={savedGame?.game}
-                initialGameKey={savedGame?.key}
-              />
-            </div>
-          )}
+        </section>
+      )}
 
-          {tab === "my-guides" && (
-            <div className="mt-6 space-y-5">
-              <YourGuides
-                user={user}
-                profile={profile}
-                friends={friends}
-                onOpenGuide={openGuide}
-                onOpenGame={openGame}
-              />
-              {user && (
-                <Friends user={user} onFriendsChanged={setFriends} />
-              )}
-            </div>
-          )}
+      {/* Battle Arena — standalone, no guide needed */}
+      {section === "arena" && (
+        <section className="mt-8 animate-fade-up">
+          <BattleArena
+            guideTopic={result?.guideTitle}
+            guideContent={result ? guideContentForGame : undefined}
+            topicType={result?.topicType}
+            user={user}
+            initialGame={savedGame?.game}
+            initialGameKey={savedGame?.key}
+          />
+        </section>
+      )}
 
-          {tab === "browse" && (
-            <div className="mt-6">
-              <Browse
-                user={user}
-                onOpenGuide={openGuide}
-                onOpenGame={openGame}
-              />
+      {/* Your Study Guides — saved guides, Favorites, Shared with you */}
+      {section === "my-guides" && (
+        <section className="mt-8 animate-fade-up">
+          <YourGuides
+            user={user}
+            profile={profile}
+            friends={friends}
+            onOpenGuide={openGuide}
+            onOpenGame={openGame}
+          />
+        </section>
+      )}
+
+      {/* Browse — public published guides and games */}
+      {section === "browse" && (
+        <section className="mt-8 animate-fade-up">
+          <Browse
+            user={user}
+            onOpenGuide={openGuide}
+            onOpenGame={openGame}
+          />
+        </section>
+      )}
+
+      {/* Friends — search, requests, friends list */}
+      {section === "friends" && (
+        <section className="mt-8 animate-fade-up">
+          {user ? (
+            <Friends user={user} onFriendsChanged={setFriends} />
+          ) : (
+            <div className="card p-6 text-center sm:p-8">
+              <h2 className="text-xl font-extrabold tracking-tight text-ink-900">
+                Friends
+              </h2>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-ink-500">
+                Sign in to find friends by username, accept friend requests,
+                and send study guides to your friends.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAuthOpen(true)}
+                className="btn-primary mx-auto mt-4 px-5 py-2.5"
+              >
+                <User className="h-4 w-4" /> Sign in
+              </button>
             </div>
           )}
         </section>
       )}
 
       {/* Empty state hint */}
-      {!result && !loading && (
+      {section === "generate" && !result && !loading && (
         <div className="mt-6 flex items-start gap-3 rounded-2xl border border-dashed border-brand-300 bg-white/70 p-5 text-sm leading-relaxed text-ink-500">
           <Upload className="mt-0.5 h-5 w-5 shrink-0 text-brand-500" />
           <p>
@@ -1456,6 +1592,8 @@ export default function Home() {
           </p>
         </div>
       )}
+
+      </main>
 
       {/* Global floating AI Study Assistant */}
       <button
