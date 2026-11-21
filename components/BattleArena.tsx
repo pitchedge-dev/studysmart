@@ -15,6 +15,11 @@ import {
   XCircle,
 } from "lucide-react";
 import TutorPanel from "./TutorPanel";
+import {
+  getMyProfile,
+  saveGuideToAccount,
+  type AppUser,
+} from "@/lib/supabase";
 
 export type GameQuestion = {
   question: string;
@@ -51,16 +56,26 @@ export default function BattleArena({
   guideTopic,
   guideContent,
   topicType,
+  user,
+  initialGame,
+  initialGameKey,
 }: {
   guideTopic?: string;
   guideContent?: string;
   topicType?: string;
+  /** Signed-in user: generated games are auto-saved to their account. */
+  user?: AppUser | null;
+  /** A saved or published game to load (from Your Study Guides / Browse). */
+  initialGame?: GameData | null;
+  /** Change this to re-load initialGame. */
+  initialGameKey?: number;
 } = {}) {
   const [topic, setTopic] = useState("");
   const [mode, setMode] = useState<Mode>("1 Player");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [game, setGame] = useState<GameData | null>(null);
+  const [gameSavedNote, setGameSavedNote] = useState<string | null>(null);
   const [playMode, setPlayMode] = useState<PlayMode>("trivia");
   const [current, setCurrent] = useState(0);
   const [scores, setScores] = useState<number[]>([0]);
@@ -98,6 +113,49 @@ export default function BattleArena({
   const hasCards = !!game?.cards && game.cards.length > 0;
   const timedSeconds = game?.timedSecondsPerQuestion;
 
+  // Load a saved / published game passed in from Your Study Guides or Browse.
+  useEffect(() => {
+    if (!initialGame) return;
+    const g = initialGame;
+    setGame(g);
+    setPlayMode("trivia");
+    setCurrent(0);
+    setScores(Array(playerCount).fill(0));
+    setTurn(0);
+    setSelected(null);
+    setFinished(false);
+    setTimeLeft(g.timedSecondsPerQuestion ?? null);
+    setTimedOut(false);
+    setCardIndex(0);
+    setFlipped(false);
+    setKnownCount(0);
+    setMatched(new Set());
+    setPickedFront(null);
+    setPickedBack(null);
+    setMatchScore(0);
+    setMatchMessage(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialGameKey]);
+
+  async function saveGameToAccount(g: GameData, source: string) {
+    if (!user) return;
+    const profile = await getMyProfile(user.id);
+    const saved = await saveGuideToAccount({
+      user,
+      profile,
+      topic: (guideTopic || source).slice(0, 500),
+      educationLevel: "",
+      testTiming: "",
+      guide: { guideTitle: g.title, gameTitle: g.title } as Record<string, unknown>,
+      quiz: g.questions,
+      kind: "game",
+      game: g as unknown as Record<string, unknown>,
+    });
+    setGameSavedNote(
+      saved ? "Game saved to your study guides." : null
+    );
+  }
+
   async function generateGame(source: string) {
     if (!source.trim() || loading) return;
     setError(null);
@@ -134,6 +192,8 @@ export default function BattleArena({
       setPickedBack(null);
       setMatchScore(0);
       setMatchMessage(null);
+      // Signed in? Save the game to the account automatically.
+      void saveGameToAccount(g, source);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -333,6 +393,11 @@ export default function BattleArena({
           </div>
           {game.gameDescription && (
             <p className="mt-1 text-sm leading-relaxed text-ink-400">{game.gameDescription}</p>
+          )}
+          {gameSavedNote && (
+            <p className="mt-1 text-xs font-semibold text-emerald-700">
+              {gameSavedNote}
+            </p>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             {(["trivia", ...(hasCards ? (["flashcards", "matching"] as PlayMode[]) : [])] as PlayMode[]).map(

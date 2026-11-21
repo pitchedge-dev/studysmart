@@ -69,6 +69,12 @@ const ConceptSchema = z.object({
     .describe(
       "For language concepts, a phonetic spelling of the concept title, generated from the supplied material so it can be spoken aloud. Omit for non-language concepts."
     ),
+  tip: z
+    .string()
+    .optional()
+    .describe(
+      "A common mistake to avoid, or a helpful tip, for this concept — only when one genuinely applies to the supplied material."
+    ),
 });
 
 const PracticeProblemSchema = z.object({
@@ -142,8 +148,8 @@ const ModuleSchema = z.object({
   concepts: z
     .array(ConceptSchema)
     .min(1)
-    .max(3)
-    .describe("The concepts in this module, in learning order, taken from the supplied material. At most 3."),
+    .max(4)
+    .describe("The concepts in this module, in learning order, taken from the supplied material. At most 4."),
   coreIdeas: z
     .array(z.string())
     .min(1)
@@ -180,6 +186,24 @@ const GenerateResultSchema = z.object({
     .describe(
       "A comprehensive study guide in Markdown with headers, bullet points, and clear explanations, based strictly on the supplied material."
     ),
+  summary: z
+    .string()
+    .describe(
+      "A short summary of the whole guide in two or three sentences, based strictly on the supplied material."
+    ),
+  keyTerms: z
+    .array(
+      z.object({
+        term: z.string().describe("A key term from the supplied material."),
+        definition: z
+          .string()
+          .describe("A short definition of the term, from the supplied material."),
+      })
+    )
+    .max(12)
+    .describe(
+      "The key terms of the topic with short definitions, taken from the supplied material. At most 12."
+    ),
   keyConcepts: z
     .array(z.string())
     .describe("The key concepts extracted from the supplied material."),
@@ -192,9 +216,9 @@ const GenerateResultSchema = z.object({
   modules: z
     .array(ModuleSchema)
     .min(1)
-    .max(2)
+    .max(3)
     .describe(
-      "The study material organised into at most 2 modules, each with concept cards and targeted practice."
+      "The study material organised into up to 3 modules, each with concept cards and targeted practice."
     ),
   quiz: z
     .array(QuizQuestionSchema)
@@ -211,7 +235,7 @@ const SimpleModuleSchema = z.object({
   title: z.string(),
   intro: z.string(),
   format: z.string().optional(),
-  concepts: z.array(ConceptSchema).min(1).max(3),
+  concepts: z.array(ConceptSchema).min(1).max(4),
   practice: z.array(PracticeGroupSchema),
 });
 
@@ -219,9 +243,14 @@ const SimpleGenerateResultSchema = z.object({
   topicType: z.string(),
   guideTitle: z.string(),
   studyGuide: z.string(),
+  summary: z.string().optional(),
+  keyTerms: z
+    .array(z.object({ term: z.string(), definition: z.string() }))
+    .max(12)
+    .optional(),
   keyConcepts: z.array(z.string()),
   languageCode: z.string().optional(),
-  modules: z.array(SimpleModuleSchema).min(1).max(2),
+  modules: z.array(SimpleModuleSchema).min(1).max(3),
   quiz: z.array(QuizQuestionSchema).max(6).optional(),
 });
 
@@ -339,7 +368,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join(" ");
 
-    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} Organise the material into at most 2 modules, with at most 3 concepts per module, and include at most one checkpoint in the whole guide. Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with up to three problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, and one worked example; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Keep the whole response compact enough to fit: short explanations, short examples, short practice questions.`;
+    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} Organise the material into up to 3 modules, with up to 4 concepts per module, and include at most one checkpoint in the whole guide. Cover the input topic in depth: never drop a topic from the supplied material, and let depth scale with the input — short notes get a focused guide, long notes get full coverage of everything in them. Never pad with unrelated material and never invent content beyond the input. Start the guide with a short summary of two or three sentences, and include a key-terms list with short definitions. Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with up to three problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, and one worked example, plus a common-mistake or tip where one genuinely applies; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Keep the whole response compact enough to fit: short explanations, short examples, short practice questions.`;
 
     const textPart = hasText
       ? `User-supplied material:\n\n${text}`
@@ -372,15 +401,17 @@ export async function POST(req: NextRequest) {
           schema: GenerateResultSchema,
           system: systemPrompt,
           messages: [{ role: "user", content }],
-          maxTokens: 3072,
+          maxTokens: 4096,
           maxRetries: 0,
-          abortSignal: AbortSignal.timeout(20000),
+          abortSignal: AbortSignal.timeout(25000),
         });
         return NextResponse.json({
           topicType: object.topicType,
           languageCode: object.languageCode,
           guideTitle: object.guideTitle,
           studyGuide: object.studyGuide,
+          summary: object.summary,
+          keyTerms: object.keyTerms ?? [],
           keyConcepts: object.keyConcepts ?? [],
           modules: object.modules ?? [],
           quiz: includeQuiz ? object.quiz ?? [] : undefined,
@@ -397,15 +428,17 @@ export async function POST(req: NextRequest) {
             schema: SimpleGenerateResultSchema,
             system: simplePrompt,
             messages: [{ role: "user", content }],
-            maxTokens: 2048,
+            maxTokens: 3072,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(20000),
+            abortSignal: AbortSignal.timeout(25000),
           });
           return NextResponse.json({
             topicType: object.topicType,
             languageCode: object.languageCode,
             guideTitle: object.guideTitle,
             studyGuide: object.studyGuide,
+            summary: object.summary,
+            keyTerms: object.keyTerms ?? [],
             keyConcepts: object.keyConcepts ?? [],
             modules: (object.modules ?? []).map((m) => ({
               ...m,

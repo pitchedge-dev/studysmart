@@ -43,6 +43,7 @@ export type StudyModule = {
     translation?: string;
     category?: string;
     pronunciation?: string;
+    tip?: string;
   }[];
   coreIdeas?: string[];
   reasoningExample?: ReasoningExample;

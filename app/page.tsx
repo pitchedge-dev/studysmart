@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import {
@@ -8,8 +8,13 @@ import {
   Bot,
   Brain,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  FileUp,
+  Globe,
   GraduationCap,
   ImagePlus,
+  Library,
   Lightbulb,
   Loader2,
   MessageSquareHeart,
@@ -17,17 +22,29 @@ import {
   Sparkles,
   Swords,
   Upload,
+  User,
   Wand2,
   X,
   XCircle,
 } from "lucide-react";
 import TutorPanel from "@/components/TutorPanel";
-import BattleArena from "@/components/BattleArena";
+import BattleArena, { type GameData } from "@/components/BattleArena";
 import TargetedPractice, { type StudyModule } from "@/components/TargetedPractice";
 import Pronunciation from "@/components/Pronunciation";
 import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
 import FeedbackModal from "@/components/FeedbackModal";
+import AuthModal from "@/components/AuthModal";
+import YourGuides from "@/components/YourGuides";
+import Browse from "@/components/Browse";
+import Friends, { type FriendEntry } from "@/components/Friends";
+import {
+  getMyProfile,
+  getSupabase,
+  saveGuideToAccount,
+  type AppUser,
+  type Profile,
+} from "@/lib/supabase";
 
 const Sketchpad = dynamic(() => import("@/components/Sketchpad"), {
   ssr: false,
@@ -45,21 +62,45 @@ type QuizQuestion = {
   explanation: string;
 };
 
-type GenerateResult = {
+export type GenerateResult = {
   topicType?: string;
   languageCode?: string;
   guideTitle?: string;
   studyGuide: string;
+  summary?: string;
+  keyTerms?: { term: string; definition: string }[];
   keyConcepts: string[];
   modules?: StudyModule[];
   quiz?: QuizQuestion[];
 };
 
-type Tab = "guide" | "quiz" | "arena";
+type Tab = "guide" | "quiz" | "arena" | "my-guides" | "browse";
+
+type UploadedFile = {
+  name: string;
+  size: number;
+  kind: "text" | "image";
+  /** Extracted text for text/PDF files. */
+  text?: string;
+  /** Data URL for images (sent to Gemini as image input). */
+  dataUrl?: string;
+};
+
+const MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB across all files
+const MAX_PDF_PAGES = 50;
+const MAX_FILE_CHARS = 100000;
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function Home() {
   const [inputText, setInputText] = useState("");
   const [images, setImages] = useState<string[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [fileNotice, setFileNotice] = useState<string | null>(null);
   const [includeQuiz, setIncludeQuiz] = useState(true);
   const [extractConcepts, setExtractConcepts] = useState(true);
   const [educationLevel, setEducationLevel] = useState("");
@@ -67,9 +108,26 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
-  const [tab, setTab] = useState<Tab>("guide");
+  const [tab, setTab] = useState<Tab>("browse");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+
+  // Account / library state
+  const [user, setUser] = useState<AppUser | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [friends, setFriends] = useState<FriendEntry[]>([]);
+  const [savedGame, setSavedGame] = useState<{
+    game: GameData;
+    topic: string;
+    key: number;
+  } | null>(null);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+
+  // Guide navigation state
+  const [collapsedModules, setCollapsedModules] = useState<Record<number, boolean>>({});
+  const [activeModule, setActiveModule] = useState<number>(1);
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   // AI Edit
   const [editOpen, setEditOpen] = useState(false);
@@ -84,33 +142,193 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleImageFiles(files: FileList | null) {
-    if (!files) return;
-    const readers = Array.from(files).map(
-      (file) =>
-        new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = () => reject(new Error("Could not read image."));
-          reader.readAsDataURL(file);
-        })
+  // ---- Account session -------------------------------------------------
+  async function refreshAuth() {
+    const sb = getSupabase();
+    if (!sb) {
+      setUser(null);
+      setProfile(null);
+      return;
+    }
+    const { data } = await sb.auth.getSession();
+    const sessionUser = data.session?.user ?? null;
+    setUser(sessionUser);
+    setProfile(
+      sessionUser ? await getMyProfile(sessionUser.id) : null
     );
-    Promise.all(readers)
-      .then((dataUrls) => setImages((prev) => [...prev, ...dataUrls]))
-      .catch(() => setError("One of the images could not be read."));
   }
 
+  useEffect(() => {
+    refreshAuth();
+    const sb = getSupabase();
+    if (!sb) return;
+    const { data: listener } = sb.auth.onAuthStateChange(() => {
+      refreshAuth();
+    });
+    return () => listener.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Guide navigation: which module is on screen + back-to-top -------
+  useEffect(() => {
+    if (!result?.modules?.length) return;
+    const sections = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-module]")
+    );
+    if (sections.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveModule(Number(entry.target.getAttribute("data-module")));
+          }
+        }
+      },
+      { rootMargin: "-20% 0px -70% 0px" }
+    );
+    sections.forEach((s) => observer.observe(s));
+    return () => observer.disconnect();
+  }, [result]);
+
+  useEffect(() => {
+    const onScroll = () => setShowBackToTop(window.scrollY > 600);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  function readFileAsText(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string) || "");
+      reader.onerror = () => reject(new Error("Could not read file."));
+      reader.readAsText(file);
+    });
+  }
+
+  function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Could not read file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function extractPdfText(file: File): Promise<string> {
+    // pdfjs-dist is loaded in the browser only, on demand.
+    const pdfjs = await import("pdfjs-dist");
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${"6.5.438"}/build/pdf.worker.min.mjs`;
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+    const pages = Math.min(pdf.numPages, MAX_PDF_PAGES);
+    const chunks: string[] = [];
+    for (let i = 1; i <= pages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      chunks.push(
+        content.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" ")
+      );
+    }
+    return chunks.join("\n");
+  }
+
+  /** Upload .pdf / .txt / .md / .csv files and images. Text is extracted in
+   *  the browser and appended to the notes at generate time; images keep the
+   *  existing image path to Gemini. */
+  async function handleUploadFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setFileNotice(null);
+    const incoming = Array.from(files);
+    const currentTotal = uploadedFiles.reduce((n, f) => n + f.size, 0);
+    const incomingTotal = incoming.reduce((n, f) => n + f.size, 0);
+    if (currentTotal + incomingTotal > MAX_TOTAL_UPLOAD_BYTES) {
+      setFileNotice(
+        `Those files are too large to process — keep total uploads under ${formatBytes(MAX_TOTAL_UPLOAD_BYTES)}.`
+      );
+      return;
+    }
+    const done: UploadedFile[] = [];
+    for (const file of incoming) {
+      const lower = file.name.toLowerCase();
+      try {
+        if (/\.(png|jpe?g|webp)$/.test(lower)) {
+          const dataUrl = await readFileAsDataUrl(file);
+          setImages((prev) => [...prev, dataUrl]);
+          done.push({ name: file.name, size: file.size, kind: "image", dataUrl });
+        } else if (/\.pdf$/.test(lower)) {
+          const text = await extractPdfText(file);
+          if (!text.trim()) {
+            setFileNotice(
+              `Could not read any text from ${file.name} — it may be a scanned image PDF.`
+            );
+            continue;
+          }
+          done.push({
+            name: file.name,
+            size: file.size,
+            kind: "text",
+            text: text.slice(0, MAX_FILE_CHARS),
+          });
+        } else if (/\.(txt|md|csv)$/.test(lower)) {
+          const text = await readFileAsText(file);
+          done.push({
+            name: file.name,
+            size: file.size,
+            kind: "text",
+            text: text.slice(0, MAX_FILE_CHARS),
+          });
+        } else {
+          setFileNotice(
+            `${file.name} is not a supported file type. Upload .pdf, .txt, .md, .csv, or an image.`
+          );
+        }
+      } catch {
+        setFileNotice(`Could not read ${file.name}. Try a different file.`);
+      }
+    }
+    if (done.length > 0) {
+      setUploadedFiles((prev) => [...prev, ...done]);
+    }
+  }
+
+  function removeUploadedFile(index: number) {
+    setUploadedFiles((prev) => {
+      const removed = prev[index];
+      if (removed?.kind === "image" && removed.dataUrl) {
+        setImages((imgs) => imgs.filter((src) => src !== removed.dataUrl));
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  }
+
+  const fileTextChars = uploadedFiles.reduce(
+    (n, f) => n + (f.text?.length ?? 0),
+    0
+  );
+  const combinedNotes = [
+    inputText.trim(),
+    ...uploadedFiles
+      .filter((f) => f.kind === "text" && f.text?.trim())
+      .map((f) => `--- From file: ${f.name} ---\n${f.text}`),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   async function generate() {
-    if ((!inputText.trim() && images.length === 0) || loading) return;
+    const notes = combinedNotes;
+    if ((!notes && images.length === 0) || loading) return;
     setError(null);
     setLoading(true);
     setResult(null);
+    setSaveNote(null);
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: inputText.trim(),
+          text: notes,
           images,
           includeQuiz,
           extractConcepts,
@@ -123,7 +341,34 @@ export default function Home() {
         throw new Error(
           data.detail ? `${data.error || "Failed to generate study material."} (${data.detail})` : data.error || "Failed to generate study material."
         );
-      setResult(data as GenerateResult);
+      const generated = data as GenerateResult;
+      setResult(generated);
+      setAnswers({});
+      setPracticeProgress({ answered: 0, correct: 0 });
+      setCheckpointByModule({});
+      setBestScores({});
+      setCollapsedModules({});
+      setActiveModule(1);
+      setTab("guide");
+      setWorkspaceOpen(false);
+      // Signed in? Save the guide to the account automatically.
+      if (user) {
+        const saved = await saveGuideToAccount({
+          user,
+          profile,
+          topic: (inputText.trim() || generated.guideTitle || "Study guide").slice(0, 500),
+          educationLevel,
+          testTiming,
+          guide: generated as unknown as Record<string, unknown>,
+          quiz: generated.quiz,
+          kind: "guide",
+        });
+        setSaveNote(
+          saved
+            ? "Saved to Your Study Guides."
+            : "Generated, but could not save it to your account."
+        );
+      }
       setAnswers({});
       setPracticeProgress({ answered: 0, correct: 0 });
       setCheckpointByModule({});
@@ -145,6 +390,25 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function openGuide(saved: GenerateResult) {
+    setResult(saved);
+    setAnswers({});
+    setPracticeProgress({ answered: 0, correct: 0 });
+    setCheckpointByModule({});
+    setBestScores({});
+    setCollapsedModules({});
+    setActiveModule(1);
+    setTab("guide");
+    setWorkspaceOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function openGame(game: GameData, topic: string) {
+    setSavedGame({ game, topic, key: Date.now() });
+    setTab("arena");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function applyEdit() {
@@ -265,8 +529,16 @@ export default function Home() {
           </div>
           <button
             type="button"
-            onClick={() => setFeedbackOpen(true)}
+            onClick={() => setAuthOpen(true)}
             className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
+          >
+            <User className="h-3.5 w-3.5" />
+            {profile?.display_name ?? "Account"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setFeedbackOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
           >
             <MessageSquareHeart className="h-3.5 w-3.5" /> Give feedback
           </button>
@@ -391,18 +663,24 @@ export default function Home() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept=".pdf,.txt,.md,.csv,.png,.jpg,.jpeg,.webp"
               multiple
               className="hidden"
-              onChange={(e) => handleImageFiles(e.target.files)}
+              onChange={(e) => {
+                void handleUploadFiles(e.target.files);
+                e.target.value = "";
+              }}
             />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="btn-secondary"
             >
-              <ImagePlus className="h-4 w-4 text-brand-600" /> Upload Image
+              <FileUp className="h-4 w-4 text-brand-600" /> Upload files
             </button>
+            <span className="text-xs font-medium text-ink-400">
+              .pdf, .txt, .md, .csv, or images — text is read from your files
+            </span>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50">
               <input
                 type="checkbox"
@@ -424,7 +702,7 @@ export default function Home() {
             <button
               type="button"
               onClick={generate}
-              disabled={loading || (!inputText.trim() && images.length === 0)}
+              disabled={loading || (!combinedNotes && images.length === 0)}
               className="btn-primary ml-auto px-6 py-2.5"
             >
               {loading ? (
@@ -464,6 +742,47 @@ export default function Home() {
             </div>
           )}
 
+          {uploadedFiles.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {uploadedFiles.map((f, i) => (
+                <div
+                  key={`${f.name}-${i}`}
+                  className="flex items-center gap-3 rounded-xl border border-ink-100 bg-white px-3 py-2 text-sm shadow-sm"
+                >
+                  <FileUp className="h-4 w-4 shrink-0 text-brand-600" />
+                  <span className="min-w-0 flex-1 truncate font-semibold text-ink-800">
+                    {f.name}
+                  </span>
+                  <span className="shrink-0 text-xs font-medium text-ink-400">
+                    {formatBytes(f.size)}
+                    {f.kind === "text"
+                      ? ` · ${(f.text?.length ?? 0).toLocaleString()} characters read`
+                      : " · image"}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${f.name}`}
+                    onClick={() => removeUploadedFile(i)}
+                    className="rounded-full p-1 text-ink-400 hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+              {fileTextChars > 0 && (
+                <p className="text-xs font-medium text-ink-400">
+                  {fileTextChars.toLocaleString()} characters read from your
+                  files — they will be added to your notes when you generate.
+                  Your files are never published.
+                </p>
+              )}
+            </div>
+          )}
+
+          {fileNotice && (
+            <p className="feedback-neutral mt-4">{fileNotice}</p>
+          )}
+
           {error && (
             <div className="feedback-wrong mt-4 font-medium">{error}</div>
           )}
@@ -496,18 +815,20 @@ export default function Home() {
         </div>
       )}
 
-      {/* Results dashboard — only shown once real data exists */}
-      {result && !loading && (
+      {/* Tabs — always visible: Study Guide / Quiz / Arena need a generated
+          guide, while Your Study Guides and Browse work any time. */}
+      {!loading && (
         <section className="mt-8 animate-fade-up">
           <div className="flex flex-wrap gap-1.5 rounded-2xl bg-ink-100/70 p-1.5">
             <button
               type="button"
-              onClick={() => setTab("guide")}
+              onClick={() => result && setTab("guide")}
+              disabled={!result}
               className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
                 tab === "guide"
                   ? "bg-white text-brand-700 shadow-soft"
                   : "text-ink-500 hover:text-ink-800"
-              }`}
+              } ${!result ? "opacity-50" : ""}`}
             >
               <BookOpen className="h-4 w-4" /> Study Guide
             </button>
@@ -540,9 +861,37 @@ export default function Home() {
             >
               <Swords className="h-4 w-4" /> Battle Arena
             </button>
+            <button
+              type="button"
+              onClick={() => setTab("my-guides")}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
+                tab === "my-guides"
+                  ? "bg-white text-brand-700 shadow-soft"
+                  : "text-ink-500 hover:text-ink-800"
+              }`}
+            >
+              <Library className="h-4 w-4" /> Your Study Guides
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("browse")}
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
+                tab === "browse"
+                  ? "bg-white text-brand-700 shadow-soft"
+                  : "text-ink-500 hover:text-ink-800"
+              }`}
+            >
+              <Globe className="h-4 w-4" /> Browse
+            </button>
           </div>
 
-          {tab === "guide" && (
+          {tab === "guide" && !result && (
+            <p className="card mt-6 p-5 text-sm leading-relaxed text-ink-500">
+              Generate a study guide above and it will appear here.
+            </p>
+          )}
+
+          {tab === "guide" && result && (
             <div className="mt-6 space-y-5">
               {result.guideTitle && (
                 <div>
@@ -562,6 +911,80 @@ export default function Home() {
                 <p>
                   <span className="chip capitalize">{result.topicType}</span>
                 </p>
+              )}
+
+              {saveNote && (
+                <p className="text-sm font-semibold text-emerald-700">
+                  {saveNote}
+                </p>
+              )}
+
+              {result.summary && (
+                <div className="card p-5 sm:p-6">
+                  <h2 className="text-sm font-bold tracking-tight text-ink-900">
+                    Summary
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-ink-600">
+                    {result.summary}
+                  </p>
+                </div>
+              )}
+
+              {result.keyTerms && result.keyTerms.length > 0 && (
+                <div className="card p-5 sm:p-6">
+                  <h2 className="text-sm font-bold tracking-tight text-ink-900">
+                    Key terms
+                  </h2>
+                  <dl className="mt-3 space-y-2">
+                    {result.keyTerms.map((kt) => (
+                      <div key={kt.term} className="text-sm leading-relaxed">
+                        <dt className="inline font-bold text-ink-900">
+                          {kt.term}:{" "}
+                        </dt>
+                        <dd className="inline text-ink-600">
+                          {kt.definition}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
+
+              {modules.length > 0 && (
+                <nav
+                  aria-label="Guide contents"
+                  className="card sticky top-[72px] z-20 p-4 shadow-soft"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-bold tracking-tight text-ink-900">
+                      On this page
+                    </p>
+                    <p className="text-xs font-semibold text-ink-400">
+                      Module {Math.min(activeModule, modules.length)} of{" "}
+                      {modules.length}
+                    </p>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {modules.map((m) => (
+                      <button
+                        key={m.moduleNumber}
+                        type="button"
+                        onClick={() =>
+                          document
+                            .getElementById(`module-${m.moduleNumber}`)
+                            ?.scrollIntoView({ behavior: "smooth" })
+                        }
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                          activeModule === m.moduleNumber
+                            ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
+                            : "bg-ink-100 text-ink-700 hover:bg-ink-200"
+                        }`}
+                      >
+                        {m.moduleNumber}. {m.title}
+                      </button>
+                    ))}
+                  </div>
+                </nav>
               )}
 
               {modules.length > 0 && (
@@ -663,6 +1086,14 @@ export default function Home() {
                               </strong>{" "}
                               {concept.example}
                             </p>
+                            {concept.tip && (
+                              <p className="mt-2 rounded-xl bg-amber-50/80 px-3 py-2 text-sm leading-relaxed text-amber-800 ring-1 ring-inset ring-amber-100">
+                                <strong className="font-bold">
+                                  Watch out:
+                                </strong>{" "}
+                                {concept.tip}
+                              </p>
+                            )}
                             {(concept.pronunciation || isVocabulary) && (
                               <Pronunciation
                                 term={concept.title}
@@ -692,29 +1123,57 @@ export default function Home() {
                       </ol>
                     </div>
                   );
+                  const collapsed =
+                    collapsedModules[mod.moduleNumber] ?? false;
                   return (
-                    <div key={mod.moduleNumber} className="space-y-5">
+                    <section
+                      key={mod.moduleNumber}
+                      id={`module-${mod.moduleNumber}`}
+                      data-module={mod.moduleNumber}
+                      className="scroll-mt-36 space-y-5"
+                    >
                       <div className="card relative overflow-hidden p-5 sm:p-6">
                         <div className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-brand-500 to-accent-400" />
-                        <div className="flex flex-wrap items-center justify-between gap-2 pl-2">
-                          <p className="eyebrow">
-                            Module {mod.moduleNumber}
-                            {mod.format ? ` · ${mod.format}` : ""}
-                          </p>
-                          {isVocabulary && (
-                            <span className="chip-amber">Spotlight</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCollapsedModules((prev) => ({
+                              ...prev,
+                              [mod.moduleNumber]: !collapsed,
+                            }))
+                          }
+                          aria-expanded={!collapsed}
+                          className="block w-full pl-2 text-left"
+                        >
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="eyebrow">
+                              Module {mod.moduleNumber}
+                              {mod.format ? ` · ${mod.format}` : ""}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              {isVocabulary && (
+                                <span className="chip-amber">Spotlight</span>
+                              )}
+                              {collapsed ? (
+                                <ChevronDown className="h-5 w-5 text-ink-400" />
+                              ) : (
+                                <ChevronUp className="h-5 w-5 text-ink-400" />
+                              )}
+                            </span>
+                          </span>
+                          <span className="mt-1.5 block text-2xl font-extrabold tracking-tight text-ink-900">
+                            {mod.title}
+                          </span>
+                          {mod.intro && (
+                            <span className="mt-1 block text-sm leading-relaxed text-ink-400">
+                              {mod.intro}
+                            </span>
                           )}
-                        </div>
-                        <h2 className="mt-1.5 pl-2 text-2xl font-extrabold tracking-tight text-ink-900">
-                          {mod.title}
-                        </h2>
-                        {mod.intro && (
-                          <p className="mt-1 pl-2 text-sm leading-relaxed text-ink-400">
-                            {mod.intro}
-                          </p>
-                        )}
+                        </button>
                       </div>
 
+                      {!collapsed && (
+                        <>
                       {isCoreIdeas ? (
                         <>
                           {coreIdeas}
@@ -752,7 +1211,9 @@ export default function Home() {
                           }
                         />
                       )}
-                    </div>
+                        </>
+                      )}
+                    </section>
                   );
                 })}
 
@@ -947,9 +1408,37 @@ export default function Home() {
           {tab === "arena" && (
             <div className="mt-4">
               <BattleArena
-                guideTopic={result.guideTitle}
-                guideContent={guideContentForGame}
-                topicType={result.topicType}
+                guideTopic={result?.guideTitle}
+                guideContent={result ? guideContentForGame : undefined}
+                topicType={result?.topicType}
+                user={user}
+                initialGame={savedGame?.game}
+                initialGameKey={savedGame?.key}
+              />
+            </div>
+          )}
+
+          {tab === "my-guides" && (
+            <div className="mt-6 space-y-5">
+              <YourGuides
+                user={user}
+                profile={profile}
+                friends={friends}
+                onOpenGuide={openGuide}
+                onOpenGame={openGame}
+              />
+              {user && (
+                <Friends user={user} onFriendsChanged={setFriends} />
+              )}
+            </div>
+          )}
+
+          {tab === "browse" && (
+            <div className="mt-6">
+              <Browse
+                user={user}
+                onOpenGuide={openGuide}
+                onOpenGame={openGame}
               />
             </div>
           )}
@@ -966,14 +1455,6 @@ export default function Home() {
             nothing is pre-filled.
           </p>
         </div>
-      )}
-
-      {/* Standalone Battle Arena — no study guide needed. Play a game from
-          any topic or notes, straight from the landing page. */}
-      {!result && !loading && (
-        <section className="mt-6 animate-fade-up">
-          <BattleArena />
-        </section>
       )}
 
       {/* Global floating AI Study Assistant */}
@@ -1005,6 +1486,24 @@ export default function Home() {
         onClose={() => setFeedbackOpen(false)}
         topic={result?.guideTitle ?? (inputText.trim() ? inputText.trim() : undefined)}
       />
+
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        user={user}
+        profile={profile}
+        onAuthChanged={refreshAuth}
+      />
+
+      {showBackToTop && (
+        <button
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="fixed bottom-5 left-5 z-40 inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-4 py-2.5 text-sm font-bold text-ink-700 shadow-lift transition hover:border-brand-300 hover:text-brand-700"
+        >
+          <ChevronUp className="h-4 w-4" /> Back to top
+        </button>
+      )}
     </div>
   );
 }
