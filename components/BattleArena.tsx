@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   Brain,
   CheckCircle2,
   Layers,
+  LayoutTemplate,
   Loader2,
   Play,
+  RefreshCw,
   RotateCcw,
   Sparkles,
   Timer,
@@ -38,6 +41,20 @@ export type GameData = {
   timedSecondsPerQuestion?: number;
   cards?: GameCard[];
   questions: GameQuestion[];
+};
+
+/** Step 1 of the two-step Arena flow: a fast, INCOMPLETE game idea — just a
+ *  title, a game type, a one-line description, and 1–2 sample questions as a
+ *  taste. The user picks one and the AI finishes the full game from it. */
+export type GameTemplate = {
+  title: string;
+  gameType: string;
+  description: string;
+  sampleQuestions: {
+    question: string;
+    options: string[];
+    correctAnswer: string;
+  }[];
 };
 
 type Mode = "1 Player" | "2 Player Local" | "Multiplayer";
@@ -76,6 +93,12 @@ export default function BattleArena({
   const [error, setError] = useState<string | null>(null);
   const [game, setGame] = useState<GameData | null>(null);
   const [gameSavedNote, setGameSavedNote] = useState<string | null>(null);
+  // Two-step flow state: fast template previews, then the finished game.
+  const [templates, setTemplates] = useState<GameTemplate[] | null>(null);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [templatesSource, setTemplatesSource] = useState("");
+  const [chosenTemplate, setChosenTemplate] = useState<GameTemplate | null>(null);
   const [playMode, setPlayMode] = useState<PlayMode>("trivia");
   const [current, setCurrent] = useState(0);
   const [scores, setScores] = useState<number[]>([0]);
@@ -134,6 +157,9 @@ export default function BattleArena({
     setPickedBack(null);
     setMatchScore(0);
     setMatchMessage(null);
+    setTemplates(null);
+    setChosenTemplate(null);
+    setTemplatesError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialGameKey]);
 
@@ -156,18 +182,59 @@ export default function BattleArena({
     );
   }
 
-  async function generateGame(source: string) {
-    if (!source.trim() || loading) return;
+  // Step 1: fast, incomplete template previews — three game ideas in a few
+  // seconds, generated on demand from the topic (lightest model first).
+  async function generateTemplates(source: string) {
+    if (!source.trim() || templatesLoading || loading) return;
     setError(null);
-    setLoading(true);
+    setTemplatesError(null);
+    setTemplatesLoading(true);
     setGame(null);
     setFinished(false);
+    setTemplates(null);
+    setChosenTemplate(null);
+    setTemplatesSource(source.trim());
     try {
       const res = await fetch("/api/generate-game", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topicOrNotes: source.trim(),
+          step: "templates",
+          topicType,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to dream up game ideas.");
+      const list = data.templates as GameTemplate[];
+      if (!Array.isArray(list) || list.length === 0) {
+        throw new Error("No game ideas came back — try again.");
+      }
+      setTemplates(list);
+    } catch (e) {
+      setTemplatesError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }
+
+  // Step 2: the user picked a template — the AI finishes the full game
+  // from it (full question set, answers, cards where the type uses them).
+  async function chooseTemplate(template: GameTemplate) {
+    if (loading) return;
+    setError(null);
+    setLoading(true);
+    setGame(null);
+    setFinished(false);
+    setChosenTemplate(template);
+    try {
+      const res = await fetch("/api/generate-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topicOrNotes: templatesSource,
+          step: "full",
+          chosenTemplate: template,
           playerCount,
           questionCount: 10,
           topicType,
@@ -177,7 +244,7 @@ export default function BattleArena({
       if (!res.ok) throw new Error(data.error || "Failed to generate the game.");
       const g = data as GameData;
       setGame(g);
-      setPlayMode(g.cards && g.cards.length > 0 ? "trivia" : "trivia");
+      setPlayMode("trivia");
       setCurrent(0);
       setScores(Array(playerCount).fill(0));
       setTurn(0);
@@ -193,12 +260,19 @@ export default function BattleArena({
       setMatchScore(0);
       setMatchMessage(null);
       // Signed in? Save the game to the account automatically.
-      void saveGameToAccount(g, source);
+      void saveGameToAccount(g, templatesSource);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
+  }
+
+  // Go back to the template choices to pick a different one instead.
+  function backToTemplates() {
+    setGame(null);
+    setFinished(false);
+    setError(null);
   }
 
   // Timer for timed games (trivia mode only)
@@ -248,6 +322,10 @@ export default function BattleArena({
 
   function restart() {
     setGame(null);
+    setTemplates(null);
+    setChosenTemplate(null);
+    setTemplatesError(null);
+    setError(null);
     setCurrent(0);
     setScores([0]);
     setTurn(0);
@@ -289,13 +367,13 @@ export default function BattleArena({
         <div>
           <h2 className="text-xl font-extrabold tracking-tight">Battle Arena</h2>
           <p className="text-sm leading-relaxed text-ink-400">
-            Turn any topic or notes into a live game — the game type is chosen
-            to fit the topic.
+            Pick a game style from a few quick ideas — then the AI finishes
+            the full game for you.
           </p>
         </div>
       </div>
 
-      {!game && !loading && (
+      {!game && !loading && !templates && !templatesLoading && (
         <div className="mt-4 space-y-3">
           {guideContent && (
             <div className="rounded-2xl bg-gradient-to-br from-brand-50 to-accent-50 p-4 ring-1 ring-inset ring-brand-100">
@@ -304,12 +382,12 @@ export default function BattleArena({
                 {guideTopic ? ` — ${guideTopic}` : ""}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-brand-700">
-                The game is generated on demand from this guide&apos;s content,
-                with the game type chosen to fit the topic.
+                First you&apos;ll get a few quick game ideas to choose from —
+                then the AI builds the full game from the one you pick.
               </p>
               <button
                 type="button"
-                onClick={() => generateGame(guideContent)}
+                onClick={() => generateTemplates(guideContent)}
                 className="btn-primary mt-3"
               >
                 <Play className="h-4 w-4" /> Generate Guide Game
@@ -342,18 +420,144 @@ export default function BattleArena({
             )}
             <button
               type="button"
-              onClick={() => generateGame(topic)}
+              onClick={() => generateTemplates(topic)}
               disabled={!topic.trim()}
               className="btn-primary ml-auto"
             >
               <Play className="h-4 w-4" /> Generate Game
             </button>
           </div>
-          {error && (
+          {(error || templatesError) && (
             <div className="feedback-wrong mt-3 font-medium">
-              {error}
+              {error || templatesError}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Step 1 result: three incomplete template previews to choose from */}
+      {!game && !loading && templates && (
+        <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-extrabold tracking-tight">
+                Pick a game style
+              </h3>
+              <p className="text-sm text-ink-400">
+                Three quick ideas for your topic — choose one and the AI will
+                finish the full game.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => generateTemplates(templatesSource)}
+                disabled={templatesLoading}
+                className="btn-secondary"
+              >
+                <RefreshCw className="h-4 w-4" /> Regenerate templates
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTemplates(null);
+                  setChosenTemplate(null);
+                  setTemplatesError(null);
+                }}
+                className="btn-secondary"
+              >
+                <ArrowLeft className="h-4 w-4" /> Change topic
+              </button>
+            </div>
+          </div>
+
+          {templatesError && (
+            <div className="feedback-wrong font-medium">{templatesError}</div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-3">
+            {templates.map((t, i) => (
+              <article
+                key={`${t.title}-${i}`}
+                className="card flex flex-col p-4"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-glow">
+                  <LayoutTemplate className="h-5 w-5" />
+                </span>
+                <h4 className="mt-3 text-base font-extrabold leading-snug tracking-tight">
+                  {t.title}
+                </h4>
+                <span className="chip mt-2 self-start">{t.gameType}</span>
+                <p className="mt-2 text-sm leading-relaxed text-ink-400">
+                  {t.description}
+                </p>
+                {t.sampleQuestions?.length > 0 && (
+                  <div className="mt-3 space-y-3 border-t border-ink-100 pt-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-ink-400">
+                      A taste
+                    </p>
+                    {t.sampleQuestions.map((q, qi) => (
+                      <div key={qi}>
+                        <p className="text-sm font-semibold leading-relaxed text-ink-900">
+                          {q.question}
+                        </p>
+                        <ul className="mt-1 space-y-1">
+                          {q.options.map((opt) => (
+                            <li
+                              key={opt}
+                              className={`flex items-center gap-1.5 text-sm ${
+                                opt === q.correctAnswer
+                                  ? "font-semibold text-emerald-700"
+                                  : "text-ink-400"
+                              }`}
+                            >
+                              {opt === q.correctAnswer && (
+                                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                              )}
+                              <span>{opt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => chooseTemplate(t)}
+                  disabled={loading}
+                  className="btn-primary mt-4 w-full justify-center"
+                >
+                  <Play className="h-4 w-4" /> Choose this one
+                </button>
+              </article>
+            ))}
+          </div>
+
+          {error && (
+            <div className="feedback-wrong font-medium">{error}</div>
+          )}
+        </div>
+      )}
+
+      {templatesLoading && (
+        <div className="mt-6 flex flex-col items-center gap-4 py-10 text-center">
+          <Brain className="h-12 w-12 text-brand-600" />
+          <div>
+            <p className="text-lg font-semibold">Dreaming up game ideas…</p>
+            <p className="text-sm text-ink-400">
+              A few quick game styles for your topic — just a few seconds.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="brainstorm-dot h-3 w-3 rounded-full bg-brand-500"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </div>
         </div>
       )}
 
@@ -361,9 +565,11 @@ export default function BattleArena({
         <div className="mt-6 flex flex-col items-center gap-4 py-10 text-center">
           <Brain className="h-12 w-12 text-brand-600" />
           <div>
-            <p className="text-lg font-semibold">Brainstorming…</p>
+            <p className="text-lg font-semibold">
+              Building your game{chosenTemplate ? ` — ${chosenTemplate.title}` : ""}…
+            </p>
             <p className="text-sm text-ink-400">
-              Building your game from your topic.
+              Finishing the full game from the style you picked.
             </p>
           </div>
           <div className="flex gap-2">
@@ -667,7 +873,16 @@ export default function BattleArena({
       )}
 
       {game && (
-        <div className="mt-4 flex justify-center">
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          {templates && templates.length > 0 && (
+            <button
+              type="button"
+              onClick={backToTemplates}
+              className="btn-secondary"
+            >
+              <ArrowLeft className="h-4 w-4" /> Back to templates
+            </button>
+          )}
           <button
             type="button"
             onClick={restart}

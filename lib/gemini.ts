@@ -20,6 +20,19 @@ export const GEMINI_MODEL_FALLBACKS = [
   "gemini-3.1-flash-lite",
 ] as const;
 
+/**
+ * Lite-first order for the fast Battle Arena template step: the lightest
+ * models answer in a few seconds and have the largest free allowance, so
+ * template previews start there and only fall back to the full chain if
+ * both Lite models are overloaded.
+ */
+export const GEMINI_LITE_MODEL_FALLBACKS = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.6-flash",
+] as const;
+
 function createProvider() {
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!apiKey) return null;
@@ -38,6 +51,14 @@ export function getModels() {
   const google = createProvider();
   if (!google) return [];
   return GEMINI_MODEL_FALLBACKS.map((id) => google(id));
+}
+
+/** Lite models first, then the rest of the chain — for the fast template
+ *  preview step, which must return in a few seconds. Empty when no key is set. */
+export function getLiteModels() {
+  const google = createProvider();
+  if (!google) return [];
+  return GEMINI_LITE_MODEL_FALLBACKS.map((id) => google(id));
 }
 
 /** True when an error means the model is overloaded / rate-limited / out of

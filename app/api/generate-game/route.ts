@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
+  getLiteModels,
   getModels,
   isOverloadedError,
   MISSING_KEY_MESSAGE,
@@ -58,14 +59,80 @@ const GameSchema = z.object({
   questions: z.array(GameQuestionSchema).describe("The game questions."),
 });
 
+/**
+ * Step 1 of the two-step Arena flow: fast, INCOMPLETE template previews.
+ * Three different game ideas for the topic — just a title, a game type, a
+ * one-line description, and 1–2 sample questions as a taste. The user picks
+ * one, and only then does the AI build the full game. Everything is
+ * generated on demand from the user's topic; nothing is premade.
+ */
+const TemplateSampleQuestionSchema = z.object({
+  question: z.string().describe("A sample question for this game idea, from the supplied material."),
+  options: z
+    .array(z.string())
+    .length(4)
+    .describe("Exactly four answer options for the sample question."),
+  correctAnswer: z
+    .string()
+    .describe("The exact text of the correct option, matching one of the options."),
+});
+
+const GameTemplateSchema = z.object({
+  title: z.string().describe("A short, engaging name for this game idea, derived from the supplied topic/notes."),
+  gameType: z
+    .string()
+    .describe(
+      "The game type for this idea — for example trivia race, flashcards, matching, quiz showdown, or timed speed drill. Pick a type that fits the topic."
+    ),
+  description: z
+    .string()
+    .describe("One line describing how this game is played."),
+  sampleQuestions: z
+    .array(TemplateSampleQuestionSchema)
+    .min(1)
+    .max(2)
+    .describe("One or two sample questions as a taste of this game idea — no more."),
+});
+
+const TemplatesSchema = z.object({
+  templates: z
+    .array(GameTemplateSchema)
+    .length(3)
+    .describe("Exactly three different game ideas for the supplied topic, each a different game type where possible."),
+});
+
+const ChosenTemplateSchema = z.object({
+  title: z.string(),
+  gameType: z.string(),
+  description: z.string(),
+  sampleQuestions: z
+    .array(
+      z.object({
+        question: z.string(),
+        options: z.array(z.string()),
+        correctAnswer: z.string(),
+      })
+    )
+    .optional(),
+});
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { topicOrNotes, playerCount, questionCount, topicType } = body as {
+    const {
+      topicOrNotes,
+      playerCount,
+      questionCount,
+      topicType,
+      step,
+      chosenTemplate,
+    } = body as {
       topicOrNotes?: string;
       playerCount?: number;
       questionCount?: number;
       topicType?: string;
+      step?: string;
+      chosenTemplate?: unknown;
     };
 
     if (typeof topicOrNotes !== "string" || topicOrNotes.trim().length === 0) {
@@ -75,6 +142,49 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const topicHint =
+      typeof topicType === "string" && topicType.trim()
+        ? `The supplied material was classified as: ${topicType.trim()}. `
+        : "";
+
+    // ---- Step 1: fast template previews (lightest models first) ----
+    if (step === "templates") {
+      const models = getLiteModels();
+      if (models.length === 0) {
+        return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
+      }
+
+      let lastErr: unknown = null;
+      for (const model of models) {
+        try {
+          const { object } = await generateObject({
+            model,
+            schema: TemplatesSchema,
+            system: `You are StudySMART's Battle Arena game designer. ${topicHint}Dream up exactly 3 DIFFERENT game ideas for the supplied topic or notes — make the game types different from each other where the topic allows (for example trivia race, flashcards, matching, quiz showdown, timed speed drill). These are INCOMPLETE previews, not full games: for each idea give only a short title, the game type, one line describing how it plays, and 1–2 sample questions with four options and the correct answer, all taken strictly from the supplied material. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Keep every description to one short line.`,
+            prompt: `Topic / notes to dream up game ideas from:\n\n${topicOrNotes}`,
+            maxTokens: 1024,
+            maxRetries: 0,
+            abortSignal: AbortSignal.timeout(10000),
+          });
+
+          return NextResponse.json({ templates: object.templates });
+        } catch (err) {
+          lastErr = err;
+          console.error("[/api/generate-game templates] attempt failed:", err);
+          if (!isOverloadedError(err)) break;
+        }
+      }
+
+      if (isOverloadedError(lastErr)) {
+        return NextResponse.json(
+          { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+          { status: 503 }
+        );
+      }
+      throw lastErr;
+    }
+
+    // ---- Step 2: full game (from a chosen template, or the old direct way) ----
     const models = getModels();
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
@@ -90,10 +200,18 @@ export async function POST(req: NextRequest) {
         ? Math.min(Math.floor(playerCount), 8)
         : 1;
 
-    const topicHint =
-      typeof topicType === "string" && topicType.trim()
-        ? `The supplied material was classified as: ${topicType.trim()}. `
-        : "";
+    let templateInstruction = "";
+    const parsedTemplate = ChosenTemplateSchema.safeParse(chosenTemplate);
+    if (parsedTemplate.success) {
+      const t = parsedTemplate.data;
+      const sampleText = (t.sampleQuestions ?? [])
+        .map(
+          (q, i) =>
+            `Sample ${i + 1}: "${q.question}" (options: ${q.options.join("; ")}; correct: ${q.correctAnswer})`
+        )
+        .join("\n");
+      templateInstruction = `The user chose this game template — build the FULL game from it, keeping its title, game type, and style: title "${t.title}", game type "${t.gameType}", how it plays: "${t.description}".${sampleText ? `\nSample questions to match in style and difficulty:\n${sampleText}` : ""} Expand it into the full game below; do not switch to a different game type. `;
+    }
 
     // Walk the model fallback chain — each model tried at most once, so an
     // overloaded model does not burn its free quota on retries.
@@ -103,7 +221,7 @@ export async function POST(req: NextRequest) {
         const { object } = await generateObject({
           model,
           schema: GameSchema,
-          system: `You are StudySMART's Battle Arena game generator. ${topicHint}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
+          system: `You are StudySMART's Battle Arena game generator. ${topicHint}${templateInstruction}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
           prompt: `Topic / notes to build the game from:\n\n${topicOrNotes}`,
           maxTokens: 3072,
           maxRetries: 0,
