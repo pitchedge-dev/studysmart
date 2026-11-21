@@ -96,9 +96,9 @@ export default function Pronunciation({
   }
 
   return (
-    <div className="mt-3 rounded-lg bg-slate-50 p-3">
+    <div className="mt-4 rounded-xl bg-brand-50/60 p-3.5 ring-1 ring-inset ring-brand-100">
       {pronunciation && (
-        <p className="text-sm text-slate-600">
+        <p className="text-sm font-medium text-ink-600">
           <strong>Pronunciation:</strong> {pronunciation}
         </p>
       )}
@@ -106,7 +106,7 @@ export default function Pronunciation({
         <button
           type="button"
           onClick={speak}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="btn-secondary px-3 py-1.5"
         >
           <AudioLines className="h-4 w-4 text-brand-600" /> Speak
         </button>
@@ -114,21 +114,21 @@ export default function Pronunciation({
           type="button"
           onClick={listen}
           disabled={listening}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          className="btn-secondary px-3 py-1.5"
         >
           <Mic className="h-4 w-4 text-brand-600" />
           {listening ? "Listening…" : "Say it"}
         </button>
       </div>
       {heard !== null && (
-        <p className="mt-2 text-sm text-slate-700">
+        <p className="mt-2.5 text-sm text-ink-600">
           You said: “{heard}” —{" "}
           <strong className={result === "correct" ? "text-green-700" : "text-red-700"}>
             {result === "correct" ? "Correct!" : "Try again."}
           </strong>
         </p>
       )}
-      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+      {error && <p className="mt-2 text-sm font-medium text-rose-700">{error}</p>}
     </div>
   );
 }

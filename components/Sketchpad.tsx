@@ -12,16 +12,16 @@ export default function Sketchpad() {
   const [eraseMode, setEraseMode] = useState(false);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2">
-        <span className="text-sm font-semibold text-slate-700 mr-1">Workspace</span>
+    <div className="card overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-ink-100 bg-ink-50/50 px-3 py-2.5">
+        <span className="mr-1 text-sm font-extrabold tracking-tight text-ink-900">Workspace</span>
         <button
           type="button"
           onClick={() => setEraseMode(false)}
           className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${
             !eraseMode
-              ? "bg-brand-600 text-white"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-sm"
+              : "bg-ink-100 text-ink-700 hover:bg-ink-200"
           }`}
         >
           <Pen className="h-3.5 w-3.5" /> Pen
@@ -31,8 +31,8 @@ export default function Sketchpad() {
           onClick={() => setEraseMode(true)}
           className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${
             eraseMode
-              ? "bg-brand-600 text-white"
-              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-sm"
+              : "bg-ink-100 text-ink-700 hover:bg-ink-200"
           }`}
         >
           <Eraser className="h-3.5 w-3.5" /> Eraser
@@ -49,7 +49,7 @@ export default function Sketchpad() {
               }}
               className={`h-6 w-6 rounded-full border-2 ${
                 color === c && !eraseMode
-                  ? "border-slate-900"
+                  ? "border-ink-900"
                   : "border-transparent"
               }`}
               style={{ backgroundColor: c }}
@@ -60,14 +60,14 @@ export default function Sketchpad() {
           <button
             type="button"
             onClick={() => canvasRef.current?.undo()}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold bg-ink-100 text-ink-700 transition hover:bg-ink-200"
           >
             <Undo2 className="h-3.5 w-3.5" /> Undo
           </button>
           <button
             type="button"
             onClick={() => canvasRef.current?.clearCanvas()}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold bg-rose-50 text-rose-600 transition hover:bg-rose-100"
           >
             <Trash2 className="h-3.5 w-3.5" /> Clear
           </button>
@@ -82,7 +82,7 @@ export default function Sketchpad() {
         style={{ width: "100%", height: 420 }}
         className="touch-none"
       />
-      <p className="px-3 py-2 text-xs text-slate-500 border-t border-slate-200">
+      <p className="border-t border-ink-100 bg-ink-50/50 px-3 py-2.5 text-xs font-medium text-ink-400">
         Sketch, annotate, and take handwritten notes — works with mouse, stylus,
         and touchscreens.
       </p>

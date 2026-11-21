@@ -221,14 +221,14 @@ export default function BattleArena({
   const matchDone = cards.length > 0 && matched.size === cards.length;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="card p-5 sm:p-6">
       <div className="flex items-center gap-2">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-accent-400 to-accent-600 text-white shadow-glow">
           <Trophy className="h-5 w-5" />
         </span>
         <div>
-          <h2 className="text-lg font-bold">Battle Arena</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-xl font-extrabold tracking-tight">Battle Arena</h2>
+          <p className="text-sm leading-relaxed text-ink-400">
             Turn any topic or notes into a live game — the game type is chosen
             to fit the topic.
           </p>
@@ -238,19 +238,19 @@ export default function BattleArena({
       {!game && !loading && (
         <div className="mt-4 space-y-3">
           {guideContent && (
-            <div className="rounded-lg bg-brand-50 p-4">
-              <p className="text-sm font-semibold text-brand-800">
+            <div className="rounded-2xl bg-gradient-to-br from-brand-50 to-accent-50 p-4 ring-1 ring-inset ring-brand-100">
+              <p className="text-sm font-bold text-brand-800">
                 Play a game from this study guide
                 {guideTopic ? ` — ${guideTopic}` : ""}
               </p>
-              <p className="mt-1 text-xs text-brand-700">
+              <p className="mt-1 text-xs leading-relaxed text-brand-700">
                 The game is generated on demand from this guide&apos;s content,
                 with the game type chosen to fit the topic.
               </p>
               <button
                 type="button"
                 onClick={() => generateGame(guideContent)}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                className="btn-primary mt-3"
               >
                 <Play className="h-4 w-4" /> Generate Guide Game
               </button>
@@ -261,7 +261,7 @@ export default function BattleArena({
             onChange={(e) => setTopic(e.target.value)}
             rows={3}
             placeholder="Or enter a topic or paste notes to build a game from…"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            className="input"
           />
           <div className="flex flex-wrap items-center gap-2">
             {(["1 Player", "2 Player Local", "Multiplayer"] as Mode[]).map(
@@ -272,8 +272,8 @@ export default function BattleArena({
                   onClick={() => setMode(m)}
                   className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ${
                     mode === m
-                      ? "bg-brand-600 text-white"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
+                      : "bg-ink-100 text-ink-700 hover:bg-ink-200"
                   }`}
                 >
                   <Users className="h-4 w-4" /> {m}
@@ -284,13 +284,13 @@ export default function BattleArena({
               type="button"
               onClick={() => generateGame(topic)}
               disabled={!topic.trim()}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+              className="btn-primary ml-auto"
             >
               <Play className="h-4 w-4" /> Generate Game
             </button>
           </div>
           {error && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="feedback-wrong mt-3 font-medium">
               {error}
             </div>
           )}
@@ -302,7 +302,7 @@ export default function BattleArena({
           <Brain className="h-12 w-12 text-brand-600" />
           <div>
             <p className="text-lg font-semibold">Brainstorming…</p>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-ink-400">
               Building your game from your topic.
             </p>
           </div>
@@ -321,8 +321,8 @@ export default function BattleArena({
       {game && !finished && (
         <div className="mt-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold">{game.title}</h3>
-            <span className="text-sm text-slate-500">
+            <h3 className="text-lg font-extrabold tracking-tight">{game.title}</h3>
+            <span className="chip">
               {game.gameType ? `${game.gameType} · ` : ""}
               {playMode === "trivia"
                 ? `Question ${current + 1} of ${game.questions.length}`
@@ -332,7 +332,7 @@ export default function BattleArena({
             </span>
           </div>
           {game.gameDescription && (
-            <p className="mt-1 text-sm text-slate-500">{game.gameDescription}</p>
+            <p className="mt-1 text-sm leading-relaxed text-ink-400">{game.gameDescription}</p>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             {(["trivia", ...(hasCards ? (["flashcards", "matching"] as PlayMode[]) : [])] as PlayMode[]).map(
@@ -343,8 +343,8 @@ export default function BattleArena({
                   onClick={() => setPlayMode(pm)}
                   className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium capitalize ${
                     playMode === pm
-                      ? "bg-brand-600 text-white"
-                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
+                      : "bg-ink-100 text-ink-700 hover:bg-ink-200"
                   }`}
                 >
                   <Layers className="h-4 w-4" /> {pm}
@@ -355,9 +355,9 @@ export default function BattleArena({
 
           {playMode === "trivia" && question && (
             <div className="mt-4">
-              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="progress-track mt-3">
                 <div
-                  className="h-full bg-brand-500 transition-all"
+                  className="progress-fill"
                   style={{
                     width: `${((current + 1) / game.questions.length) * 100}%`,
                   }}
@@ -369,31 +369,31 @@ export default function BattleArena({
                     key={i}
                     className={`rounded-full px-3 py-1 text-xs font-medium ${
                       i === turn
-                        ? "bg-brand-600 text-white"
-                        : "bg-slate-100 text-slate-700"
+                        ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
+                        : "bg-ink-100 text-ink-700"
                     }`}
                   >
                     Player {i + 1}: {s} pts
                   </span>
                 ))}
                 {timedSeconds && timeLeft !== null && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
+                  <span className="chip-amber">
                     <Timer className="h-3.5 w-3.5" /> {timeLeft}s left
                   </span>
                 )}
               </div>
-              <p className="mt-4 text-base font-medium leading-relaxed">
+              <p className="mt-4 text-base font-bold leading-relaxed text-ink-900">
                 {question.question}
               </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {question.options.map((opt) => {
                   const isCorrect = opt === question.correctAnswer;
                   const isPicked = opt === selected;
-                  let cls = "border-slate-200 bg-white hover:border-brand-400";
+                  let cls = "";
                   if (selected) {
-                    if (isCorrect) cls = "border-green-500 bg-green-50 text-green-800";
-                    else if (isPicked) cls = "border-red-500 bg-red-50 text-red-800";
-                    else cls = "border-slate-200 bg-slate-50 text-slate-400";
+                    if (isCorrect) cls = "option-correct";
+                    else if (isPicked) cls = "option-wrong";
+                    else cls = "option-dimmed";
                   }
                   return (
                     <button
@@ -401,7 +401,7 @@ export default function BattleArena({
                       type="button"
                       onClick={() => pick(opt)}
                       disabled={!!selected}
-                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-3 text-left text-sm font-medium transition ${cls}`}
+                      className={`option-btn ${cls}`}
                     >
                       <span>{opt}</span>
                       {selected && isCorrect && (
@@ -415,7 +415,7 @@ export default function BattleArena({
                 })}
               </div>
               {selected && (
-                <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                <div className="feedback-neutral mt-4">
                   {timedOut && (
                     <p className="font-semibold text-amber-700">
                       Time ran out — the correct answer is: {question.correctAnswer}
@@ -424,7 +424,7 @@ export default function BattleArena({
                   <p>
                     <strong>Explanation:</strong> {question.explanation}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="mt-1.5 text-xs font-medium text-ink-400">
                     Worth {question.points} points ·{" "}
                     {selected === question.correctAnswer
                       ? "Correct — nice work!"
@@ -434,7 +434,7 @@ export default function BattleArena({
                     <button
                       type="button"
                       onClick={nextQuestion}
-                      className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                      className="btn-primary"
                     >
                       {current + 1 >= game.questions.length
                         ? "See Results"
@@ -449,7 +449,7 @@ export default function BattleArena({
                           );
                           setTutorOpen(true);
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        className="btn-secondary"
                       >
                         <Sparkles className="h-4 w-4 text-brand-600" /> Ask AI Tutor
                       </button>
@@ -465,14 +465,14 @@ export default function BattleArena({
               <button
                 type="button"
                 onClick={() => setFlipped((v) => !v)}
-                className="mx-auto flex min-h-44 w-full max-w-md flex-col items-center justify-center rounded-xl border border-slate-200 bg-brand-50 p-6 text-lg font-semibold shadow-sm"
+                className="card card-hover mx-auto flex min-h-44 w-full max-w-md cursor-pointer flex-col items-center justify-center bg-gradient-to-br from-brand-50 to-white p-6 text-lg font-bold text-ink-900"
               >
                 {flipped ? cards[cardIndex].back : cards[cardIndex].front}
-                <span className="mt-2 text-xs font-normal text-slate-500">
+                <span className="mt-2 text-xs font-medium text-ink-400">
                   Tap to flip
                 </span>
               </button>
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm font-medium text-ink-400">
                 {knownCount} marked as known
               </p>
               <div className="mt-3 flex justify-center gap-2">
@@ -483,14 +483,14 @@ export default function BattleArena({
                     setCardIndex((i) => Math.max(0, i - 1));
                   }}
                   disabled={cardIndex === 0}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium disabled:opacity-50"
+                  className="btn-secondary"
                 >
                   Previous
                 </button>
                 <button
                   type="button"
                   onClick={() => setKnownCount((c) => c + 1)}
-                  className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                  className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 active:scale-[0.98]"
                 >
                   I knew it
                 </button>
@@ -501,7 +501,7 @@ export default function BattleArena({
                     setCardIndex((i) => Math.min(cards.length - 1, i + 1));
                   }}
                   disabled={cardIndex >= cards.length - 1}
-                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                  className="btn-primary"
                 >
                   Next
                 </button>
@@ -511,12 +511,12 @@ export default function BattleArena({
 
           {playMode === "matching" && cards.length > 0 && (
             <div className="mt-4">
-              <p className="text-sm text-slate-500">
+              <p className="text-sm leading-relaxed text-ink-400">
                 Tap one card on each side to make a pair. Score: {matchScore} pts
                 · {matched.size} of {cards.length} matched.
               </p>
               {matchMessage && (
-                <p className="mt-2 text-sm font-medium text-slate-700">{matchMessage}</p>
+                <p className="mt-2 text-sm font-bold text-ink-700">{matchMessage}</p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -528,10 +528,10 @@ export default function BattleArena({
                       onClick={() => pickMatch(i, null)}
                       className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-medium ${
                         matched.has(i)
-                          ? "border-green-500 bg-green-50 text-green-800"
+                          ? "option-correct"
                           : pickedFront === i
                             ? "border-brand-600 bg-brand-50"
-                            : "border-slate-200 bg-white hover:border-brand-400"
+                            : ""
                       }`}
                     >
                       {c.front}
@@ -547,10 +547,10 @@ export default function BattleArena({
                       onClick={() => pickMatch(null, bi)}
                       className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm font-medium ${
                         matched.has(entry.index)
-                          ? "border-green-500 bg-green-50 text-green-800"
+                          ? "option-correct"
                           : pickedBack === bi
                             ? "border-brand-600 bg-brand-50"
-                            : "border-slate-200 bg-white hover:border-brand-400"
+                            : ""
                       }`}
                     >
                       {entry.back}
@@ -571,8 +571,8 @@ export default function BattleArena({
       {game && finished && playMode === "trivia" && (
         <div className="mt-6 text-center">
           <Trophy className="mx-auto h-12 w-12 text-amber-500" />
-          <h3 className="mt-2 text-xl font-bold">Game Over!</h3>
-          <p className="text-sm text-slate-500">{game.title}</p>
+          <h3 className="mt-2 text-2xl font-extrabold tracking-tight">Game Over!</h3>
+          <p className="text-sm font-medium text-ink-400">{game.title}</p>
           <div className="mx-auto mt-4 max-w-sm space-y-2">
             {scores
               .map((s, i) => ({ player: i + 1, score: s }))
@@ -580,7 +580,7 @@ export default function BattleArena({
               .map((row, rank) => (
                 <div
                   key={row.player}
-                  className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-2 text-sm"
+                  className="flex items-center justify-between rounded-xl border border-ink-100 bg-white px-4 py-2.5 text-sm shadow-sm"
                 >
                   <span className="font-medium">
                     {rank === 0 ? "Winner — " : ""}Player {row.player}
@@ -593,7 +593,7 @@ export default function BattleArena({
             <button
               type="button"
               onClick={restart}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              className="btn-primary"
             >
               <RotateCcw className="h-4 w-4" /> Play Again
             </button>
@@ -606,7 +606,7 @@ export default function BattleArena({
           <button
             type="button"
             onClick={restart}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="btn-secondary"
           >
             <RotateCcw className="h-4 w-4" /> New Game
           </button>

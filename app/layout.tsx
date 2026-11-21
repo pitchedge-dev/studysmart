@@ -7,6 +7,10 @@ export const metadata: Metadata = {
     "Paste your notes, upload an image, or type a topic and StudySMART generates a study guide, practice quiz, and trivia game with AI.",
 };
 
+export const viewport = {
+  themeColor: "#4f46e5",
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -14,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+      <body className="min-h-screen font-sans text-ink-900 antialiased">
         {children}
       </body>
     </html>

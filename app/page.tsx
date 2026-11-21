@@ -12,6 +12,7 @@ import {
   ImagePlus,
   Lightbulb,
   Loader2,
+  MessageSquareHeart,
   Pencil,
   Sparkles,
   Swords,
@@ -26,11 +27,12 @@ import TargetedPractice, { type StudyModule } from "@/components/TargetedPractic
 import Pronunciation from "@/components/Pronunciation";
 import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
+import FeedbackModal from "@/components/FeedbackModal";
 
 const Sketchpad = dynamic(() => import("@/components/Sketchpad"), {
   ssr: false,
   loading: () => (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+    <div className="card p-6 text-sm font-medium text-ink-400">
       Loading workspace…
     </div>
   ),
@@ -65,6 +67,7 @@ export default function Home() {
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [tab, setTab] = useState<Tab>("guide");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // AI Edit
   const [editOpen, setEditOpen] = useState(false);
@@ -120,6 +123,16 @@ export default function Home() {
       setBestScores({});
       setTab("guide");
       setWorkspaceOpen(false);
+      // Ask for feedback once per session, after the first guide lands —
+      // never on the blank landing page, and never on every load.
+      try {
+        if (!window.sessionStorage.getItem("studysmart-feedback-shown")) {
+          window.sessionStorage.setItem("studysmart-feedback-shown", "1");
+          window.setTimeout(() => setFeedbackOpen(true), 1500);
+        }
+      } catch {
+        // sessionStorage unavailable — skip the one-time prompt.
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -228,129 +241,184 @@ export default function Home() {
   ).length;
 
   return (
-    <div className="mx-auto max-w-5xl px-4 pb-24">
+    <div className="mx-auto max-w-5xl px-4 pb-24 sm:px-6">
       {/* Header */}
-      <header className="flex items-center gap-3 py-6">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-600 text-white">
-          <GraduationCap className="h-6 w-6" />
-        </span>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">StudySMART</h1>
-          <p className="text-sm text-slate-500">
-            Learn anything, smarter — powered by AI.
-          </p>
+      <header className="sticky top-0 z-30 -mx-4 border-b border-ink-100/70 bg-white/80 px-4 py-3 backdrop-blur-lg sm:-mx-6 sm:px-6">
+        <div className="mx-auto flex max-w-5xl items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow">
+            <GraduationCap className="h-6 w-6" />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-xl font-extrabold leading-tight tracking-tight">
+              Study<span className="gradient-text">SMART</span>
+            </h1>
+            <p className="hidden text-xs font-medium text-ink-400 sm:block">
+              Learn anything, smarter — powered by AI.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFeedbackOpen(true)}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
+          >
+            <MessageSquareHeart className="h-3.5 w-3.5" /> Give feedback
+          </button>
+          <span className="chip-amber hidden sm:inline-flex">
+            <Sparkles className="h-3.5 w-3.5" /> Generated on demand
+          </span>
         </div>
       </header>
 
-      {/* Create / Input view */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <label
-          htmlFor="study-input"
-          className="text-sm font-semibold text-slate-700"
-        >
-          What do you want to learn today?
-        </label>
-        <textarea
-          id="study-input"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          rows={6}
-          placeholder="What do you want to learn today? Paste your notes, upload an image, or type a topic"
-          className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-        />
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => handleImageFiles(e.target.files)}
-          />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <ImagePlus className="h-4 w-4" /> Upload Image
-          </button>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-            <input
-              type="checkbox"
-              checked={includeQuiz}
-              onChange={(e) => setIncludeQuiz(e.target.checked)}
-              className="h-4 w-4 accent-indigo-600"
-            />
-            Include Practice Quiz
-          </label>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-            <input
-              type="checkbox"
-              checked={extractConcepts}
-              onChange={(e) => setExtractConcepts(e.target.checked)}
-              className="h-4 w-4 accent-indigo-600"
-            />
-            Extract Key Concepts
-          </label>
-          <button
-            type="button"
-            onClick={generate}
-            disabled={loading || (!inputText.trim() && images.length === 0)}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Generating…
-              </>
-            ) : (
-              <>
-                <Wand2 className="h-4 w-4" /> Generate
-              </>
-            )}
-          </button>
+      {/* Hero */}
+      {!result && !loading && (
+        <div className="hero-glow animate-fade-up -mx-4 px-4 pb-2 pt-10 text-center sm:-mx-6 sm:px-6 sm:pt-14">
+          <p className="chip mx-auto">
+            <Brain className="h-3.5 w-3.5" /> Your notes in · A full study kit out
+          </p>
+          <h2 className="mx-auto mt-4 max-w-2xl text-4xl font-extrabold leading-[1.08] tracking-tight text-ink-900 sm:text-5xl">
+            Turn any topic into a{" "}
+            <span className="gradient-text">beautiful study guide</span>
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
+            Paste your notes, snap a photo, or just type a topic. StudySMART
+            builds your guide, practice, and game — fresh, every time.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs font-semibold text-ink-500">
+            <span className="chip">
+              <BookOpen className="h-3.5 w-3.5" /> Study guide
+            </span>
+            <span className="chip">
+              <Lightbulb className="h-3.5 w-3.5" /> Practice quiz
+            </span>
+            <span className="chip">
+              <Swords className="h-3.5 w-3.5" /> Battle Arena
+            </span>
+            <span className="chip-amber">
+              <Bot className="h-3.5 w-3.5" /> AI tutor
+            </span>
+          </div>
         </div>
+      )}
 
-        {images.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {images.map((src, i) => (
-              <div key={i} className="relative">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt={`Uploaded note ${i + 1}`}
-                  className="h-20 w-20 rounded-lg border border-slate-200 object-cover"
-                />
-                <button
-                  type="button"
-                  aria-label="Remove image"
-                  onClick={() =>
-                    setImages((prev) => prev.filter((_, idx) => idx !== i))
-                  }
-                  className="absolute -right-1.5 -top-1.5 rounded-full bg-slate-900 p-0.5 text-white"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Create / Input view */}
+      <section className="card animate-fade-up mt-6 overflow-hidden">
+        <div className="h-1.5 w-full bg-gradient-to-r from-brand-500 via-brand-400 to-accent-400" />
+        <div className="p-5 sm:p-7">
+          <label
+            htmlFor="study-input"
+            className="text-base font-bold tracking-tight text-ink-900"
+          >
+            What do you want to learn today?
+          </label>
+          <p className="mt-0.5 text-sm text-ink-400">
+            Paste notes, upload a photo of your textbook, or type a topic.
+          </p>
+          <textarea
+            id="study-input"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            rows={6}
+            placeholder="What do you want to learn today? Paste your notes, upload an image, or type a topic"
+            className="input mt-3 min-h-32 resize-y leading-relaxed"
+          />
 
-        {error && (
-          <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => handleImageFiles(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="btn-secondary"
+            >
+              <ImagePlus className="h-4 w-4 text-brand-600" /> Upload Image
+            </button>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50">
+              <input
+                type="checkbox"
+                checked={includeQuiz}
+                onChange={(e) => setIncludeQuiz(e.target.checked)}
+                className="h-4 w-4 accent-indigo-600"
+              />
+              Include Practice Quiz
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50">
+              <input
+                type="checkbox"
+                checked={extractConcepts}
+                onChange={(e) => setExtractConcepts(e.target.checked)}
+                className="h-4 w-4 accent-indigo-600"
+              />
+              Extract Key Concepts
+            </label>
+            <button
+              type="button"
+              onClick={generate}
+              disabled={loading || (!inputText.trim() && images.length === 0)}
+              className="btn-primary ml-auto px-6 py-2.5"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-4 w-4" /> Generate my study guide
+                </>
+              )}
+            </button>
           </div>
-        )}
+
+          {images.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {images.map((src, i) => (
+                <div key={i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`Uploaded note ${i + 1}`}
+                    className="h-20 w-20 rounded-xl border border-ink-200 object-cover shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove image"
+                    onClick={() =>
+                      setImages((prev) => prev.filter((_, idx) => idx !== i))
+                    }
+                    className="absolute -right-1.5 -top-1.5 rounded-full bg-ink-900 p-1 text-white shadow-md transition hover:bg-rose-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {error && (
+            <div className="feedback-wrong mt-4 font-medium">{error}</div>
+          )}
+        </div>
       </section>
 
       {/* Loading state */}
       {loading && (
-        <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white py-12 text-center shadow-sm">
-          <Brain className="h-10 w-10 text-brand-600" />
-          <p className="text-lg font-semibold">Building your study guide…</p>
-          <p className="text-sm text-slate-500">
-            Reading your notes and generating your personal study material.
+        <div className="card animate-fade-up mt-6 flex flex-col items-center gap-3 py-14 text-center">
+          <span className="flex h-16 w-16 animate-float items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow">
+            <Brain className="h-8 w-8" />
+          </span>
+          <p className="text-lg font-bold tracking-tight">
+            Building your study guide…
           </p>
+          <p className="max-w-sm text-sm leading-relaxed text-ink-400">
+            Reading your notes and generating your personal study material —
+            nothing pre-made, everything fresh.
+          </p>
+          <div className="shimmer-bar mt-1 h-2 w-56 rounded-full" />
           <div className="flex gap-2">
             {[0, 1, 2].map((i) => (
               <span
@@ -365,15 +433,15 @@ export default function Home() {
 
       {/* Results dashboard — only shown once real data exists */}
       {result && !loading && (
-        <section className="mt-6">
-          <div className="flex flex-wrap gap-2 border-b border-slate-200">
+        <section className="mt-8 animate-fade-up">
+          <div className="flex flex-wrap gap-1.5 rounded-2xl bg-ink-100/70 p-1.5">
             <button
               type="button"
               onClick={() => setTab("guide")}
-              className={`inline-flex items-center gap-1.5 rounded-t-lg px-4 py-2 text-sm font-medium ${
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
                 tab === "guide"
-                  ? "border-b-2 border-brand-600 bg-white text-brand-700"
-                  : "text-slate-500 hover:text-slate-700"
+                  ? "bg-white text-brand-700 shadow-soft"
+                  : "text-ink-500 hover:text-ink-800"
               }`}
             >
               <BookOpen className="h-4 w-4" /> Study Guide
@@ -382,15 +450,15 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setTab("quiz")}
-                className={`inline-flex items-center gap-1.5 rounded-t-lg px-4 py-2 text-sm font-medium ${
+                className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
                   tab === "quiz"
-                    ? "border-b-2 border-brand-600 bg-white text-brand-700"
-                    : "text-slate-500 hover:text-slate-700"
+                    ? "bg-white text-brand-700 shadow-soft"
+                    : "text-ink-500 hover:text-ink-800"
                 }`}
               >
                 <Lightbulb className="h-4 w-4" /> Practice Quiz
                 {answeredCount > 0 && (
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">
+                  <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-bold text-brand-700">
                     {correctCount}/{quiz.length}
                   </span>
                 )}
@@ -399,10 +467,10 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setTab("arena")}
-              className={`inline-flex items-center gap-1.5 rounded-t-lg px-4 py-2 text-sm font-medium ${
+              className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all sm:flex-none ${
                 tab === "arena"
-                  ? "border-b-2 border-brand-600 bg-white text-brand-700"
-                  : "text-slate-500 hover:text-slate-700"
+                  ? "bg-white text-brand-700 shadow-soft"
+                  : "text-ink-500 hover:text-ink-800"
               }`}
             >
               <Swords className="h-4 w-4" /> Battle Arena
@@ -410,40 +478,68 @@ export default function Home() {
           </div>
 
           {tab === "guide" && (
-            <div className="mt-4 space-y-4">
+            <div className="mt-6 space-y-5">
               {result.guideTitle && (
-                <h1 className="text-2xl font-bold tracking-tight">
-                  {result.guideTitle}
-                </h1>
+                <div>
+                  <h1 className="text-3xl font-extrabold tracking-tight text-ink-900 sm:text-4xl">
+                    {result.guideTitle}
+                  </h1>
+                  {result.topicType && (
+                    <p className="mt-2">
+                      <span className="chip capitalize">
+                        {result.topicType}
+                      </span>
+                    </p>
+                  )}
+                </div>
               )}
-              {result.topicType && (
-                <p className="text-sm text-slate-500">
-                  Topic type: {result.topicType}
+              {!result.guideTitle && result.topicType && (
+                <p>
+                  <span className="chip capitalize">{result.topicType}</span>
                 </p>
               )}
 
               {modules.length > 0 && (
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                      <p className="text-3xl font-bold">{totalCards}</p>
-                      <p className="text-sm text-slate-500">Topics to master</p>
+                <div className="card overflow-hidden p-5 sm:p-6">
+                  <div className="flex flex-wrap items-end justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-2xl font-extrabold text-white shadow-glow">
+                        {totalCards}
+                      </span>
+                      <div>
+                        <p className="text-base font-bold text-ink-900">
+                          Topics to master
+                        </p>
+                        <p className="text-sm text-ink-400">
+                          {modules.length} module
+                          {modules.length === 1 ? "" : "s"} ·{" "}
+                          {totalPracticeProblems + totalCheckpointQuestions}{" "}
+                          practice questions
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold">
-                        {practiceProgress.correct + checkpointProgress.correct}/
-                        {totalPracticeProblems + totalCheckpointQuestions} · Your
-                        progress
+                    <div className="text-left sm:text-right">
+                      <p className="text-sm font-bold text-ink-900">
+                        {practiceProgress.correct + checkpointProgress.correct}
+                        /
+                        {totalPracticeProblems + totalCheckpointQuestions}{" "}
+                        correct · Your progress
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className="mt-0.5 text-xs font-medium text-ink-400">
                         Saved automatically · Best test score:{" "}
-                        {bestTestScore === null ? "—" : `${bestTestScore}/10`}
+                        {bestTestScore === null ? (
+                          "—"
+                        ) : (
+                          <span className="chip-amber">
+                            {bestTestScore}/10
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
-                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="progress-track mt-4">
                     <div
-                      className="h-full bg-brand-500 transition-all"
+                      className="progress-fill"
                       style={{
                         width: `${
                           totalPracticeProblems + totalCheckpointQuestions
@@ -472,34 +568,35 @@ export default function Home() {
                         return (
                           <article
                             key={`${mod.moduleNumber}-${concept.title}`}
-                            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+                            className="card card-hover animate-fade-up p-5"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700">
-                                {concept.label}
-                              </span>
-                              <span className="text-xs text-slate-400">
+                              <span className="chip">{concept.label}</span>
+                              <span className="text-xs font-semibold text-ink-400">
                                 Card {thisCard} of {totalCards}
                               </span>
                             </div>
-                            <h3 className="mt-3 text-lg font-bold">
+                            <h3 className="mt-3 text-lg font-extrabold tracking-tight text-ink-900">
                               {concept.title}
                             </h3>
                             {concept.translation && (
-                              <p className="mt-1 text-base font-medium text-slate-700">
+                              <p className="mt-1 text-base font-semibold text-brand-700">
                                 {concept.translation}
                               </p>
                             )}
                             {concept.category && (
-                              <p className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+                              <p className="eyebrow mt-1.5">
                                 {concept.category}
                               </p>
                             )}
-                            <p className="mt-2 font-mono text-sm font-medium text-slate-800">
+                            <p className="mt-3 rounded-xl bg-brand-50/70 px-3.5 py-2.5 font-mono text-sm font-semibold leading-relaxed text-brand-800 ring-1 ring-inset ring-brand-100">
                               {concept.formulaOrDefinition}
                             </p>
-                            <p className="mt-2 text-sm text-slate-600">
-                              <strong>Example:</strong> {concept.example}
+                            <p className="mt-3 text-sm leading-relaxed text-ink-500">
+                              <strong className="font-bold text-ink-800">
+                                Example:
+                              </strong>{" "}
+                              {concept.example}
                             </p>
                             {(concept.pronunciation || isVocabulary) && (
                               <Pronunciation
@@ -514,32 +611,42 @@ export default function Home() {
                     </div>
                   );
                   const coreIdeas = mod.coreIdeas && mod.coreIdeas.length > 0 && (
-                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                      <h3 className="font-semibold">Core ideas</h3>
-                      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
+                    <div className="card p-5 sm:p-6">
+                      <h3 className="text-base font-bold tracking-tight">
+                        Core ideas
+                      </h3>
+                      <ol className="mt-3 space-y-3">
                         {mod.coreIdeas.map((idea, i) => (
-                          <li key={i}>{idea}</li>
+                          <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-600">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-extrabold text-brand-700">
+                              {i + 1}
+                            </span>
+                            <span className="pt-0.5">{idea}</span>
+                          </li>
                         ))}
                       </ol>
                     </div>
                   );
                   return (
-                    <div key={mod.moduleNumber} className="space-y-4">
-                      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    <div key={mod.moduleNumber} className="space-y-5">
+                      <div className="card relative overflow-hidden p-5 sm:p-6">
+                        <div className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-brand-500 to-accent-400" />
+                        <div className="flex flex-wrap items-center justify-between gap-2 pl-2">
+                          <p className="eyebrow">
                             Module {mod.moduleNumber}
                             {mod.format ? ` · ${mod.format}` : ""}
                           </p>
                           {isVocabulary && (
-                            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-                              Spotlight
-                            </span>
+                            <span className="chip-amber">Spotlight</span>
                           )}
                         </div>
-                        <h2 className="mt-1 text-xl font-bold">{mod.title}</h2>
+                        <h2 className="mt-1.5 pl-2 text-2xl font-extrabold tracking-tight text-ink-900">
+                          {mod.title}
+                        </h2>
                         {mod.intro && (
-                          <p className="mt-1 text-sm text-slate-500">{mod.intro}</p>
+                          <p className="mt-1 pl-2 text-sm leading-relaxed text-ink-400">
+                            {mod.intro}
+                          </p>
                         )}
                       </div>
 
@@ -595,16 +702,13 @@ export default function Home() {
               )}
 
               {result.keyConcepts.length > 0 && (
-                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="text-sm font-semibold text-slate-700">
+                <div className="card p-5">
+                  <h2 className="text-sm font-bold tracking-tight text-ink-900">
                     Key Concepts
                   </h2>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {result.keyConcepts.map((concept, i) => (
-                      <span
-                        key={i}
-                        className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700"
-                      >
+                      <span key={i} className="chip">
                         {concept}
                       </span>
                     ))}
@@ -612,26 +716,26 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setWorkspaceOpen((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  className="btn-secondary"
                 >
-                  <Pencil className="h-4 w-4" />
+                  <Pencil className="h-4 w-4 text-brand-600" />
                   {workspaceOpen ? "Close Workspace" : "Open Workspace"}
                 </button>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs font-medium text-ink-400">
                   Sketchpad for handwritten notes alongside your guide.
                 </p>
               </div>
 
               <div
-                className={`grid gap-4 ${
+                className={`grid gap-5 ${
                   workspaceOpen ? "lg:grid-cols-2" : "grid-cols-1"
                 }`}
               >
-                <article className="markdown rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <article className="markdown card p-5 sm:p-7">
                   <ReactMarkdown>{result.studyGuide}</ReactMarkdown>
                 </article>
                 {workspaceOpen && <Sketchpad />}
@@ -641,15 +745,17 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setEditOpen((v) => !v)}
-                className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg hover:bg-amber-600"
+                className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-accent-400 to-accent-500 px-4 py-2.5 text-sm font-bold text-white shadow-lift transition hover:from-accent-500 hover:to-accent-600 active:scale-95"
               >
                 <Sparkles className="h-4 w-4" /> AI Edit
               </button>
 
               {editOpen && (
-                <div className="fixed bottom-36 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
-                  <h3 className="text-sm font-semibold">Edit with AI</h3>
-                  <p className="mt-1 text-xs text-slate-500">
+                <div className="card animate-pop fixed bottom-36 right-5 z-40 w-[calc(100vw-2.5rem)] max-w-sm p-4 shadow-lift">
+                  <h3 className="text-sm font-bold tracking-tight">
+                    Edit with AI
+                  </h3>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-400">
                     Describe how to rewrite the study guide — for example,
                     simplify a section, add more detail, or change the tone.
                   </p>
@@ -658,13 +764,13 @@ export default function Home() {
                     onChange={(e) => setEditInstructions(e.target.value)}
                     rows={3}
                     placeholder="Rewrite instructions…"
-                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                    className="input mt-3"
                   />
                   <div className="mt-2 flex justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => setEditOpen(false)}
-                      className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                      className="btn-ghost"
                     >
                       Cancel
                     </button>
@@ -672,7 +778,7 @@ export default function Home() {
                       type="button"
                       onClick={applyEdit}
                       disabled={editLoading || !editInstructions.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                      className="btn-primary px-4 py-2"
                     >
                       {editLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -688,18 +794,20 @@ export default function Home() {
           )}
 
           {tab === "quiz" && (
-            <div className="mt-4 space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mt-6 space-y-5">
+              <div className="card p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="font-semibold">Practice Quiz</h2>
-                  <span className="text-sm text-slate-500">
+                  <h2 className="text-lg font-extrabold tracking-tight">
+                    Practice Quiz
+                  </h2>
+                  <span className="chip">
                     {answeredCount} of {quiz.length} answered · {correctCount}{" "}
                     correct
                   </span>
                 </div>
-                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className="progress-track mt-3">
                   <div
-                    className="h-full bg-brand-500 transition-all"
+                    className="progress-fill"
                     style={{
                       width: `${quiz.length ? (answeredCount / quiz.length) * 100 : 0}%`,
                     }}
@@ -710,27 +818,22 @@ export default function Home() {
               {quiz.map((q, qi) => {
                 const picked = answers[qi];
                 return (
-                  <div
-                    key={qi}
-                    className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-                  >
-                    <p className="font-medium leading-relaxed">
-                      <span className="mr-2 text-slate-400">{qi + 1}.</span>
+                  <div key={qi} className="card animate-fade-up p-5 sm:p-6">
+                    <p className="text-base font-bold leading-relaxed text-ink-900">
+                      <span className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-extrabold text-brand-700">
+                        {qi + 1}
+                      </span>
                       {q.question}
                     </p>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
                       {q.options.map((opt) => {
                         const isCorrect = opt === q.correctAnswer;
                         const isPicked = opt === picked;
-                        let cls =
-                          "border-slate-200 bg-white hover:border-brand-400";
+                        let cls = "";
                         if (picked) {
-                          if (isCorrect)
-                            cls = "border-green-500 bg-green-50 text-green-800";
-                          else if (isPicked)
-                            cls = "border-red-500 bg-red-50 text-red-800";
-                          else
-                            cls = "border-slate-200 bg-slate-50 text-slate-400";
+                          if (isCorrect) cls = "option-correct";
+                          else if (isPicked) cls = "option-wrong";
+                          else cls = "option-dimmed";
                         }
                         return (
                           <button
@@ -740,21 +843,21 @@ export default function Home() {
                               setAnswers((prev) => ({ ...prev, [qi]: opt }))
                             }
                             disabled={!!picked}
-                            className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-sm font-medium transition ${cls}`}
+                            className={`option-btn ${cls}`}
                           >
                             <span>{opt}</span>
                             {picked && isCorrect && (
-                              <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
+                              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
                             )}
                             {picked && isPicked && !isCorrect && (
-                              <XCircle className="h-5 w-5 shrink-0 text-red-600" />
+                              <XCircle className="h-5 w-5 shrink-0 text-rose-500" />
                             )}
                           </button>
                         );
                       })}
                     </div>
                     {picked && (
-                      <div className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                      <div className="feedback-neutral mt-4">
                         <p>
                           <strong>Explanation:</strong> {q.explanation}
                         </p>
@@ -762,7 +865,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => openWrongAnswerTutor(q, picked)}
-                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            className="btn-secondary mt-3 px-3 py-1.5"
                           >
                             <Sparkles className="h-4 w-4 text-brand-600" />
                             Ask AI Tutor
@@ -790,8 +893,8 @@ export default function Home() {
 
       {/* Empty state hint */}
       {!result && !loading && (
-        <div className="mt-6 flex items-start gap-3 rounded-xl border border-dashed border-slate-300 bg-white/60 p-5 text-sm text-slate-500">
-          <Upload className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+        <div className="mt-6 flex items-start gap-3 rounded-2xl border border-dashed border-brand-300 bg-white/70 p-5 text-sm leading-relaxed text-ink-500">
+          <Upload className="mt-0.5 h-5 w-5 shrink-0 text-brand-500" />
           <p>
             Your study guide, quiz, and Battle Arena game will appear here once
             you generate them. Everything is created fresh from your own notes —
@@ -811,7 +914,7 @@ export default function Home() {
           setTutorOpen(true);
         }}
         aria-label="Open AI Study Assistant"
-        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg hover:bg-brand-700"
+        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow transition hover:scale-105 active:scale-95"
       >
         <Bot className="h-6 w-6" />
       </button>
@@ -822,6 +925,12 @@ export default function Home() {
         studyGuide={result?.studyGuide}
         context={tutorContext}
         title={tutorTitle}
+      />
+
+      <FeedbackModal
+        open={feedbackOpen}
+        onClose={() => setFeedbackOpen(false)}
+        topic={result?.guideTitle ?? (inputText.trim() ? inputText.trim() : undefined)}
       />
     </div>
   );
