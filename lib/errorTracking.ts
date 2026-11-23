@@ -38,7 +38,7 @@ export type GuideErrorRecord = {
 export const MASTERY_STREAK = 2;
 
 export type ErrorAnswerInput = {
-  source: "quiz" | "practice" | "checkpoint" | "personalized";
+  source: "quiz" | "practice" | "checkpoint" | "personalized" | "reasoning";
   moduleTitle: string;
   conceptTitle: string;
   question: string;

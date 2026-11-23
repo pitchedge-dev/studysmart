@@ -1432,7 +1432,12 @@ export default function Home() {
                       )}
 
                       {mod.reasoningExample && (
-                        <ShowYourReasoning example={mod.reasoningExample} />
+                        <ShowYourReasoning
+                          example={mod.reasoningExample}
+                          moduleTitle={mod.title}
+                          conceptTitle={mod.concepts[0]?.title ?? mod.title}
+                          onAnswer={guideErrors.record}
+                        />
                       )}
 
                       {mod.checkpoint && (

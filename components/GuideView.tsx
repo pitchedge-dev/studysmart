@@ -22,6 +22,7 @@ import { useGuideErrors } from "@/lib/errorTracking";
 import Pronunciation from "./Pronunciation";
 import ShowYourReasoning from "./ShowYourReasoning";
 import SectionCheckpoint from "./SectionCheckpoint";
+import GuideVideos from "./GuideVideos";
 import TutorPanel from "./TutorPanel";
 import type { GenerateResult } from "@/app/page";
 
@@ -603,7 +604,12 @@ export default function GuideView({
                       </>
                     )}
                     {mod.reasoningExample && (
-                      <ShowYourReasoning example={mod.reasoningExample} />
+                      <ShowYourReasoning
+                        example={mod.reasoningExample}
+                        moduleTitle={mod.title}
+                        conceptTitle={mod.concepts[0]?.title ?? mod.title}
+                        onAnswer={guideErrors.record}
+                      />
                     )}
                     {mod.checkpoint && (
                       <SectionCheckpoint
@@ -759,6 +765,16 @@ export default function GuideView({
               </div>
             </div>
           )}
+
+          {/* Videos that explain this topic */}
+          <GuideVideos
+            topic={result.guideTitle ?? "Study guide"}
+            moduleTitles={modules.map((m) => m.title)}
+            guideKey={
+              guideKey ??
+              `${result.guideTitle}::${result.studyGuide.length}`
+            }
+          />
 
           {/* Practice quiz */}
           {quiz.length > 0 && (
