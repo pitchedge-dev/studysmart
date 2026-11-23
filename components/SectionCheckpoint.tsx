@@ -3,17 +3,22 @@
 import { useRef, useState } from "react";
 import { CheckCircle2, Trophy, XCircle } from "lucide-react";
 import type { CheckpointQuestion } from "./TargetedPractice";
+import type { ErrorAnswerInput } from "@/lib/errorTracking";
 
 export default function SectionCheckpoint({
   moduleTitle,
   questions,
   onProgress,
   onFinish,
+  onAnswer,
 }: {
   moduleTitle: string;
   questions: CheckpointQuestion[];
   onProgress?: (answered: number, correct: number) => void;
   onFinish?: (score: number, total: number) => void;
+  /** Fired for every answered question, so the guide can track errors per
+   *  user per guide and build personalized practice from them. */
+  onAnswer?: (answer: ErrorAnswerInput) => void;
 }) {
   const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -37,6 +42,16 @@ export default function SectionCheckpoint({
     const answered = Object.keys(next).length;
     const correct = questions.filter((q, i) => next[i] === q.correctAnswer).length;
     onProgress?.(answered, correct);
+    onAnswer?.({
+      source: "checkpoint",
+      moduleTitle,
+      conceptTitle: moduleTitle,
+      question: question.question,
+      picked: option,
+      correctAnswer: question.correctAnswer,
+      explanation: question.explanation,
+      correct: option === question.correctAnswer,
+    });
   }
 
   function next() {

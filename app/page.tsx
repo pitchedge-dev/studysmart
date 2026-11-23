@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import {
@@ -32,9 +33,15 @@ import {
 import TutorPanel from "@/components/TutorPanel";
 import BattleArena, { type GameData } from "@/components/BattleArena";
 import TargetedPractice, { type StudyModule } from "@/components/TargetedPractice";
+import PersonalizedPractice from "@/components/PersonalizedPractice";
+import {
+  localGuideKey,
+  useGuideErrors,
+} from "@/lib/errorTracking";
 import Pronunciation from "@/components/Pronunciation";
 import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
+import GuideVideos from "@/components/GuideVideos";
 import FeedbackModal from "@/components/FeedbackModal";
 import AuthModal from "@/components/AuthModal";
 import YourGuides from "@/components/YourGuides";
@@ -76,6 +83,16 @@ export type GenerateResult = {
   keyConcepts: string[];
   modules?: StudyModule[];
   quiz?: QuizQuestion[];
+  /** Learning objectives — added by the enrichment pass. */
+  objectives?: string[];
+  /** One-page cheat sheet in Markdown — added by the enrichment pass. */
+  cheatSheet?: string;
+  /** Real-world applications — added by the enrichment pass. */
+  realWorldApplications?: string[];
+  /** Frequently asked questions — added by the enrichment pass. */
+  faq?: { question: string; answer: string }[];
+  /** Final review quiz covering the whole guide. */
+  finalReview?: { questions: QuizQuestion[] };
 };
 
 type Section = "generate" | "my-guides" | "browse" | "arena" | "friends";
@@ -111,6 +128,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [inputText, setInputText] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -144,6 +162,13 @@ export default function Home() {
   const [collapsedModules, setCollapsedModules] = useState<Record<number, boolean>>({});
   const [activeModule, setActiveModule] = useState<number>(1);
   const [showBackToTop, setShowBackToTop] = useState(false);
+
+  // Per-user error tracking for the guide currently on screen — one copy,
+  // one key. Saved guides use their row id; unsaved in-session guides use
+  // a content hash. Errors are private to this user and never travel with
+  // a published or shared guide.
+  const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
+  const guideErrors = useGuideErrors(currentGuideId, user?.id ?? null);
 
   // AI Edit
   const [editOpen, setEditOpen] = useState(false);
@@ -409,6 +434,8 @@ export default function Home() {
       setResultView("guide");
       setWorkspaceOpen(false);
       // Signed in? Save the guide to the account automatically.
+      // Either way, the guide copy gets its error-tracking key: the saved
+      // row id when it was saved, a content hash otherwise.
       if (user) {
         const saved = await saveGuideToAccount({
           user,
@@ -424,6 +451,21 @@ export default function Home() {
           saved
             ? "Saved to Your Study Guides."
             : "Generated, but could not save it to your account."
+        );
+        setCurrentGuideId(
+          saved
+            ? `guide:${saved.id}`
+            : localGuideKey(
+                generated.guideTitle ?? "Study guide",
+                generated.studyGuide
+              )
+        );
+      } else {
+        setCurrentGuideId(
+          localGuideKey(
+            generated.guideTitle ?? "Study guide",
+            generated.studyGuide
+          )
         );
       }
       setAnswers({});
@@ -450,7 +492,7 @@ export default function Home() {
     }
   }
 
-  function openGuide(saved: GenerateResult) {
+  function openGuide(saved: GenerateResult, guideId?: string | null) {
     setResult(saved);
     setAnswers({});
     setPracticeProgress({ answered: 0, correct: 0 });
@@ -461,7 +503,20 @@ export default function Home() {
     setSection("generate");
     setResultView("guide");
     setWorkspaceOpen(false);
+    // The opened copy gets its own error-tracking key — the saved row id
+    // when known, so your errors on it persist; a content hash otherwise.
+    setCurrentGuideId(
+      guideId
+        ? `guide:${guideId}`
+        : localGuideKey(saved.guideTitle ?? "Study guide", saved.studyGuide)
+    );
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /** Opening a saved guide jumps to its own dedicated page — the guide
+   *  as its own mini-site — instead of loading it into the Generate tab. */
+  function openGuideDetail(id: string) {
+    router.push(`/guide/${id}`);
   }
 
   function openGame(game: GameData, topic: string) {
@@ -506,6 +561,25 @@ export default function Home() {
     );
     setTutorTitle("Why was this answer wrong?");
     setTutorOpen(true);
+  }
+
+  /** Answering a quiz question records it in this user's error tracking
+   *  for this guide copy — wrong answers become weak spots, correct ones
+   *  count toward mastering a weak concept. */
+  function pickQuizAnswer(qi: number, opt: string) {
+    const q = quiz[qi];
+    if (!q || answers[qi]) return;
+    setAnswers((prev) => ({ ...prev, [qi]: opt }));
+    guideErrors.record({
+      source: "quiz",
+      moduleTitle: result?.guideTitle ?? "Practice Quiz",
+      conceptTitle: "Practice Quiz",
+      question: q.question,
+      picked: opt,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      correct: opt === q.correctAnswer,
+    });
   }
 
   function openPracticeTutor(args: {
@@ -941,8 +1015,9 @@ export default function Home() {
             Building your study guide…
           </p>
           <p className="max-w-sm text-sm leading-relaxed text-ink-400">
-            Reading your notes and generating your personal study material —
-            nothing pre-made, everything fresh.
+            Reading your notes and building your complete guide — deep modules
+            first, then the cheat sheet, FAQ, and final review. Nothing
+            pre-made, everything fresh.
           </p>
           <div className="shimmer-bar mt-1 h-2 w-56 rounded-full" />
           <div className="flex gap-2">
@@ -1039,11 +1114,32 @@ export default function Home() {
                 </div>
               )}
 
+              {result.objectives && result.objectives.length > 0 && (
+                <div className="card p-5 sm:p-6">
+                  <h2 className="text-sm font-bold tracking-tight text-ink-900">
+                    What you&apos;ll learn
+                  </h2>
+                  <ul className="mt-3 space-y-2">
+                    {result.objectives.map((objective, i) => (
+                      <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-600">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-extrabold text-brand-700">
+                          {i + 1}
+                        </span>
+                        <span className="pt-0.5">{objective}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {result.keyTerms && result.keyTerms.length > 0 && (
                 <div className="card p-5 sm:p-6">
                   <h2 className="text-sm font-bold tracking-tight text-ink-900">
-                    Key terms
+                    Glossary
                   </h2>
+                  <p className="mt-1 text-xs font-medium text-ink-400">
+                    Key terms and definitions for this topic.
+                  </p>
                   <dl className="mt-3 space-y-2">
                     {result.keyTerms.map((kt) => (
                       <div key={kt.term} className="text-sm leading-relaxed">
@@ -1056,6 +1152,22 @@ export default function Home() {
                       </div>
                     ))}
                   </dl>
+                </div>
+              )}
+
+              {result.cheatSheet && (
+                <div className="card overflow-hidden">
+                  <div className="border-b border-ink-100 bg-gradient-to-r from-brand-50 to-accent-50 px-5 py-4 sm:px-6">
+                    <h2 className="text-sm font-bold tracking-tight text-ink-900">
+                      Cheat sheet — the whole guide on one page
+                    </h2>
+                    <p className="mt-0.5 text-xs font-medium text-ink-400">
+                      Glance at this right before the test.
+                    </p>
+                  </div>
+                  <article className="markdown p-5 sm:p-6">
+                    <ReactMarkdown>{result.cheatSheet}</ReactMarkdown>
+                  </article>
                 </div>
               )}
 
@@ -1195,12 +1307,36 @@ export default function Home() {
                               </strong>{" "}
                               {concept.example}
                             </p>
+                            {concept.explanation && (
+                              <p className="mt-3 text-sm leading-relaxed text-ink-600">
+                                <strong className="font-bold text-ink-800">
+                                  How it works:
+                                </strong>{" "}
+                                {concept.explanation}
+                              </p>
+                            )}
+                            {concept.commonMistake && (
+                              <p className="mt-2 rounded-xl bg-rose-50/80 px-3 py-2 text-sm leading-relaxed text-rose-800 ring-1 ring-inset ring-rose-100">
+                                <strong className="font-bold">
+                                  Common mistake:
+                                </strong>{" "}
+                                {concept.commonMistake}
+                              </p>
+                            )}
                             {concept.tip && (
                               <p className="mt-2 rounded-xl bg-amber-50/80 px-3 py-2 text-sm leading-relaxed text-amber-800 ring-1 ring-inset ring-amber-100">
                                 <strong className="font-bold">
                                   Watch out:
                                 </strong>{" "}
                                 {concept.tip}
+                              </p>
+                            )}
+                            {concept.memoryTip && (
+                              <p className="mt-2 rounded-xl bg-emerald-50/80 px-3 py-2 text-sm leading-relaxed text-emerald-800 ring-1 ring-inset ring-emerald-100">
+                                <strong className="font-bold">
+                                  Remember it:
+                                </strong>{" "}
+                                {concept.memoryTip}
                               </p>
                             )}
                             {(concept.pronunciation || isVocabulary) && (
@@ -1303,6 +1439,7 @@ export default function Home() {
                         <SectionCheckpoint
                           moduleTitle={mod.title}
                           questions={mod.checkpoint.questions}
+                          onAnswer={guideErrors.record}
                           onProgress={(answered, correct) =>
                             setCheckpointByModule((prev) => ({
                               ...prev,
@@ -1330,10 +1467,84 @@ export default function Home() {
                 <TargetedPractice
                   modules={modules}
                   onAskTutor={openPracticeTutor}
+                  onAnswer={guideErrors.record}
                   onProgress={(answered, correct) =>
                     setPracticeProgress({ answered, correct })
                   }
                 />
+              )}
+
+              {/* Personalized practice from this user's own errors on this
+                  guide copy — never from another user's data, and never
+                  from a published or shared copy. */}
+              <PersonalizedPractice
+                guideTitle={result.guideTitle ?? "Study guide"}
+                educationLevel={educationLevel}
+                weak={guideErrors.weak}
+                mastered={guideErrors.mastered}
+                signedIn={Boolean(user)}
+                onAnswer={guideErrors.record}
+                onClearErrors={guideErrors.clear}
+              />
+
+              {result.realWorldApplications &&
+                result.realWorldApplications.length > 0 && (
+                  <div className="card p-5 sm:p-6">
+                    <h2 className="text-base font-bold tracking-tight text-ink-900">
+                      Where this shows up in real life
+                    </h2>
+                    <ul className="mt-3 space-y-2">
+                      {result.realWorldApplications.map((app, i) => (
+                        <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-600">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-100 text-xs font-extrabold text-accent-700">
+                            {i + 1}
+                          </span>
+                          <span className="pt-0.5">{app}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+              {result.faq && result.faq.length > 0 && (
+                <div className="card p-5 sm:p-6">
+                  <h2 className="text-base font-bold tracking-tight text-ink-900">
+                    Frequently asked questions
+                  </h2>
+                  <div className="mt-3 space-y-2">
+                    {result.faq.map((item, i) => (
+                      <details
+                        key={i}
+                        className="rounded-xl border border-ink-100 bg-white px-4 py-3"
+                      >
+                        <summary className="cursor-pointer text-sm font-bold leading-relaxed text-ink-900">
+                          {item.question}
+                        </summary>
+                        <p className="mt-2 text-sm leading-relaxed text-ink-600">
+                          {item.answer}
+                        </p>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.finalReview && result.finalReview.questions.length > 0 && (
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-tight">
+                    Final review — test yourself on the whole guide
+                  </h2>
+                  <p className="mt-1 text-sm leading-relaxed text-ink-400">
+                    One question at a time. Finish it to see your score.
+                  </p>
+                  <div className="mt-4">
+                    <SectionCheckpoint
+                      moduleTitle="Final review"
+                      questions={result.finalReview.questions}
+                      onAnswer={guideErrors.record}
+                    />
+                  </div>
+                </div>
               )}
 
               {result.keyConcepts.length > 0 && (
@@ -1350,6 +1561,12 @@ export default function Home() {
                   </div>
                 </div>
               )}
+
+              <GuideVideos
+                topic={result.guideTitle || "Study guide"}
+                moduleTitles={modules.map((m) => m.title)}
+                guideKey={`${result.guideTitle}::${result.studyGuide.length}`}
+              />
 
               <div className="flex flex-wrap items-center gap-3">
                 <button
@@ -1474,9 +1691,7 @@ export default function Home() {
                           <button
                             key={opt}
                             type="button"
-                            onClick={() =>
-                              setAnswers((prev) => ({ ...prev, [qi]: opt }))
-                            }
+                            onClick={() => pickQuizAnswer(qi, opt)}
                             disabled={!!picked}
                             className={`option-btn ${cls}`}
                           >
@@ -1539,6 +1754,7 @@ export default function Home() {
             profile={profile}
             friends={friends}
             onOpenGuide={openGuide}
+            onOpenGuideDetail={openGuideDetail}
             onOpenGame={openGame}
           />
         </section>
@@ -1550,6 +1766,7 @@ export default function Home() {
           <Browse
             user={user}
             onOpenGuide={openGuide}
+            onOpenGuideDetail={openGuideDetail}
             onOpenGame={openGame}
           />
         </section>

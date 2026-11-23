@@ -151,6 +151,24 @@ export async function saveGuideToAccount(args: {
   return data as StudyGuideRow;
 }
 
+/** Fetch one saved guide by id — used by the dedicated guide page
+ *  (/guide/[id]). Row-level security decides who may read it: public
+ *  guides are readable by anyone, private ones only by their owner. */
+export async function getGuideById(id: string): Promise<StudyGuideRow | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("study_guides")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    console.error("[supabase] get guide failed:", error.message);
+    return null;
+  }
+  return (data as StudyGuideRow | null) ?? null;
+}
+
 export async function listMyGuides(userId: string): Promise<StudyGuideRow[]> {
   const sb = getSupabase();
   if (!sb) return [];
@@ -392,4 +410,101 @@ export async function deleteSharedGuide(id: string): Promise<boolean> {
   const { error } = await sb.from("shared_guides").delete().eq("id", id);
   if (error) console.error("[supabase] delete shared failed:", error.message);
   return !error;
+}
+
+// ---------------------------------------------------------------------------
+// Per-user error tracking (guide_errors).
+//
+// Errors belong ONLY to the user who made them, on ONE copy of a guide.
+// guide_key identifies that copy: "guide:<study_guides row id>" for a saved,
+// published, or shared guide, or "local:<content hash>" for an unsaved
+// in-session guide. RLS only ever returns the signed-in user's own rows,
+// and error rows are never stored inside the guide JSON that gets
+// published or shared — so another user opening the same published guide
+// starts with a clean slate and never sees your errors.
+// ---------------------------------------------------------------------------
+
+export type GuideErrorRow = {
+  id?: string;
+  user_id: string;
+  guide_key: string;
+  concept_title: string;
+  module_title: string;
+  misses: number;
+  correct_streak: number;
+  total_attempts: number;
+  last_question?: string | null;
+  last_picked?: string | null;
+  last_correct?: string | null;
+  last_explanation?: string | null;
+  updated_at?: string;
+};
+
+export async function listGuideErrors(
+  userId: string,
+  guideKey: string
+): Promise<GuideErrorRow[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb
+    .from("guide_errors")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("guide_key", guideKey)
+    .order("misses", { ascending: false });
+  if (error) {
+    console.error("[supabase] list guide errors failed:", error.message);
+    return [];
+  }
+  return (data as GuideErrorRow[]) ?? [];
+}
+
+export async function upsertGuideErrors(
+  userId: string,
+  guideKey: string,
+  records: GuideErrorRow[]
+): Promise<boolean> {
+  const sb = getSupabase();
+  if (!sb) return false;
+  if (records.length === 0) return true;
+  const { error } = await sb.from("guide_errors").upsert(
+    records.map((r) => ({
+      user_id: userId,
+      guide_key: guideKey,
+      concept_title: r.concept_title,
+      module_title: r.module_title,
+      misses: r.misses,
+      correct_streak: r.correct_streak,
+      total_attempts: r.total_attempts,
+      last_question: r.last_question ?? null,
+      last_picked: r.last_picked ?? null,
+      last_correct: r.last_correct ?? null,
+      last_explanation: r.last_explanation ?? null,
+      updated_at: new Date().toISOString(),
+    })),
+    { onConflict: "user_id,guide_key,concept_title" }
+  );
+  if (error) {
+    console.error("[supabase] save guide errors failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function deleteGuideErrors(
+  userId: string,
+  guideKey: string
+): Promise<boolean> {
+  const sb = getSupabase();
+  if (!sb) return false;
+  const { error } = await sb
+    .from("guide_errors")
+    .delete()
+    .eq("user_id", userId)
+    .eq("guide_key", guideKey);
+  if (error) {
+    console.error("[supabase] delete guide errors failed:", error.message);
+    return false;
+  }
+  return true;
 }

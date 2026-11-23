@@ -192,8 +192,8 @@ export async function POST(req: NextRequest) {
 
     const count =
       typeof questionCount === "number" && questionCount > 0
-        ? Math.min(Math.max(Math.floor(questionCount), 1), 20)
-        : 10;
+        ? Math.min(Math.max(Math.floor(questionCount), 1), 30)
+        : 20;
 
     const players =
       typeof playerCount === "number" && playerCount > 0
@@ -213,43 +213,94 @@ export async function POST(req: NextRequest) {
       templateInstruction = `The user chose this game template — build the FULL game from it, keeping its title, game type, and style: title "${t.title}", game type "${t.gameType}", how it plays: "${t.description}".${sampleText ? `\nSample questions to match in style and difficulty:\n${sampleText}` : ""} Expand it into the full game below; do not switch to a different game type. `;
     }
 
-    // Walk the model fallback chain — each model tried at most once, so an
-    // overloaded model does not burn its free quota on retries.
-    let lastErr: unknown = null;
-    for (const model of models) {
-      try {
-        const { object } = await generateObject({
-          model,
-          schema: GameSchema,
-          system: `You are StudySMART's Battle Arena game generator. ${topicHint}${templateInstruction}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Generate exactly ${count} questions for ${players} player(s). Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`,
-          prompt: `Topic / notes to build the game from:\n\n${topicOrNotes}`,
-          maxTokens: 3072,
-          maxRetries: 0,
-          abortSignal: AbortSignal.timeout(20000),
-        });
+    // Build the full game. Short games (10 questions) are generated in one
+    // call; longer games (20–30) are built in sequential 10-question
+    // batches behind the one loading state, so a long game cannot time out
+    // the 60s function. Each batch after the first is told the earlier
+    // questions so it does not repeat them, and keeps the same title, game
+    // type, and style. Cards come from the first batch only.
+    const CHUNK = 10;
+    const chunkCount = Math.ceil(count / CHUNK);
 
-        return NextResponse.json({
-          title: object.title,
-          gameType: object.gameType,
-          gameDescription: object.gameDescription,
-          timedSecondsPerQuestion: object.timedSecondsPerQuestion,
-          cards: object.cards ?? [],
-          questions: object.questions,
-        });
-      } catch (err) {
-        lastErr = err;
-        console.error("[/api/generate-game] attempt failed:", err);
-        if (!isOverloadedError(err)) break;
+    async function runBatch(
+      system: string,
+      prompt: string,
+      abortMs: number
+    ): Promise<z.infer<typeof GameSchema>> {
+      let batchErr: unknown = null;
+      for (const model of models) {
+        try {
+          const { object } = await generateObject({
+            model,
+            schema: GameSchema,
+            system,
+            prompt,
+            maxTokens: 3072,
+            maxRetries: 0,
+            abortSignal: AbortSignal.timeout(abortMs),
+          });
+          return object;
+        } catch (err) {
+          batchErr = err;
+          console.error("[/api/generate-game batch] attempt failed:", err);
+          if (!isOverloadedError(err)) break;
+        }
       }
+      throw batchErr;
     }
 
-    if (isOverloadedError(lastErr)) {
-      return NextResponse.json(
-        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
-        { status: 503 }
-      );
+    const basePrompt = `Topic / notes to build the game from:\n\n${topicOrNotes}`;
+    const baseSystem = `You are StudySMART's Battle Arena game generator. ${topicHint}${templateInstruction}First decide the game type that fits this topic — for example a timed speed drill for quantitative material, matching or flashcards for vocabulary material, or a quiz race for other material — then build that game strictly from the topic or notes the user supplies. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Vary the difficulty and assign points between 100 and 500 per question based on difficulty. When the chosen game type is timed, set seconds per question. When the chosen game type uses cards, also provide front/back cards taken from the supplied material.`;
+
+    let merged: z.infer<typeof GameSchema> | null = null;
+    let lastErr: unknown = null;
+    try {
+      for (let c = 0; c < chunkCount; c++) {
+        const start = c * CHUNK;
+        const wanted = Math.min(CHUNK, count - start);
+        const prior = merged ? merged.questions.map((q) => q.question) : [];
+        const system =
+          chunkCount === 1
+            ? `${baseSystem} Generate exactly ${count} questions for ${players} player(s).`
+            : c === 0
+              ? `${baseSystem} This is PART 1 of ${chunkCount} of one game — generate exactly ${wanted} questions (questions 1–${wanted} of ${count}) for ${players} player(s).`
+              : `${baseSystem} This is PART ${c + 1} of ${chunkCount} of the SAME game you started in part 1 — keep the same title, game type, and style. Generate exactly ${wanted} NEW questions (questions ${start + 1}–${start + wanted} of ${count}) for ${players} player(s). Do not repeat or rephrase any of these earlier questions from this same game:\n${prior
+                  .map((q, i) => `${i + 1}. ${q}`)
+                  .join("\n")}\nDo not include cards — part 1 already has them.`;
+        const part = await runBatch(
+          system,
+          basePrompt,
+          chunkCount === 1 ? 20000 : 15000
+        );
+        if (!merged) {
+          merged = part;
+        } else {
+          merged.questions = [...merged.questions, ...part.questions];
+        }
+      }
+    } catch (err) {
+      lastErr = err;
+      if (isOverloadedError(lastErr)) {
+        return NextResponse.json(
+          { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+          { status: 503 }
+        );
+      }
+      throw lastErr;
     }
-    throw lastErr;
+
+    if (!merged) {
+      throw new Error("Game generation returned no content.");
+    }
+    const object = merged;
+    return NextResponse.json({
+      title: object.title,
+      gameType: object.gameType,
+      gameDescription: object.gameDescription,
+      timedSecondsPerQuestion: object.timedSecondsPerQuestion,
+      cards: object.cards ?? [],
+      questions: object.questions,
+    });
   } catch (err) {
     console.error("[/api/generate-game] error:", err);
     return NextResponse.json(

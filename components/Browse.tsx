@@ -44,10 +44,14 @@ function titleOf(row: StudyGuideRow): string {
 export default function Browse({
   user,
   onOpenGuide,
+  onOpenGuideDetail,
   onOpenGame,
 }: {
   user: AppUser | null;
-  onOpenGuide: (result: GenerateResult) => void;
+  /** The optional guideId keys this copy for per-user error tracking. */
+  onOpenGuide: (result: GenerateResult, guideId?: string | null) => void;
+  /** Open a published guide on its own dedicated page (/guide/[id]). */
+  onOpenGuideDetail?: (id: string) => void;
   onOpenGame: (game: GameData, topic: string) => void;
 }) {
   const [items, setItems] = useState<StudyGuideRow[]>([]);
@@ -76,7 +80,12 @@ export default function Browse({
       onOpenGame(row.game as unknown as GameData, row.topic);
       return;
     }
-    onOpenGuide(row.guide as unknown as GenerateResult);
+    // Published guides open on their own dedicated page.
+    if (onOpenGuideDetail) {
+      onOpenGuideDetail(row.id);
+      return;
+    }
+    onOpenGuide(row.guide as unknown as GenerateResult, row.id);
   }
 
   async function toggleFavorite(row: StudyGuideRow) {

@@ -61,12 +61,16 @@ export default function YourGuides({
   profile,
   friends,
   onOpenGuide,
+  onOpenGuideDetail,
   onOpenGame,
 }: {
   user: AppUser | null;
   profile: Profile | null;
   friends: Friend[];
-  onOpenGuide: (result: GenerateResult) => void;
+  /** The optional guideId keys this copy for per-user error tracking. */
+  onOpenGuide: (result: GenerateResult, guideId?: string | null) => void;
+  /** Open a saved guide on its own dedicated page (/guide/[id]). */
+  onOpenGuideDetail?: (id: string) => void;
   onOpenGame: (game: GameData, topic: string) => void;
 }) {
   const [guides, setGuides] = useState<StudyGuideRow[]>([]);
@@ -141,7 +145,12 @@ export default function YourGuides({
       onOpenGame(row.game as unknown as GameData, row.topic);
       return;
     }
-    onOpenGuide(row.guide as unknown as GenerateResult);
+    // Saved guides open on their own dedicated page.
+    if (onOpenGuideDetail) {
+      onOpenGuideDetail(row.id);
+      return;
+    }
+    onOpenGuide(row.guide as unknown as GenerateResult, row.id);
   }
 
   function openShared(row: SharedGuideRow) {
@@ -150,7 +159,12 @@ export default function YourGuides({
       onOpenGame(snap.game as unknown as GameData, (snap.topic as string) || "Shared game");
       return;
     }
-    onOpenGuide((snap.guide ?? snap) as unknown as GenerateResult);
+    // A shared guide that still exists as a saved guide opens on its own page.
+    if (row.guide_id && onOpenGuideDetail) {
+      onOpenGuideDetail(row.guide_id);
+      return;
+    }
+    onOpenGuide((snap.guide ?? snap) as unknown as GenerateResult, row.guide_id ?? null);
   }
 
   async function saveSharedToMine(row: SharedGuideRow) {

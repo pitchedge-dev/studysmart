@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CheckCircle2, Sparkles, XCircle } from "lucide-react";
+import type { ErrorAnswerInput } from "@/lib/errorTracking";
 
 export type PracticeProblem = {
   type?: string;
@@ -44,6 +45,12 @@ export type StudyModule = {
     category?: string;
     pronunciation?: string;
     tip?: string;
+    /** Full plain-language explanation of how the concept works. */
+    explanation?: string;
+    /** The most common mistake with this concept and how to avoid it. */
+    commonMistake?: string;
+    /** Short memory aid for this concept. */
+    memoryTip?: string;
   }[];
   coreIdeas?: string[];
   reasoningExample?: ReasoningExample;
@@ -63,6 +70,7 @@ export default function TargetedPractice({
   modules,
   onAskTutor,
   onProgress,
+  onAnswer,
 }: {
   modules: StudyModule[];
   onAskTutor: (args: {
@@ -73,6 +81,9 @@ export default function TargetedPractice({
     conceptTitle: string;
   }) => void;
   onProgress?: (answered: number, correct: number) => void;
+  /** Fired for every answered problem, so the guide can track errors per
+   *  user per guide and build personalized practice from them. */
+  onAnswer?: (answer: ErrorAnswerInput) => void;
 }) {
   // key: `${moduleIdx}-${groupIdx}-${problemIdx}` -> { picked, correct }
   const [answers, setAnswers] = useState<
@@ -105,21 +116,48 @@ export default function TargetedPractice({
   function recordAnswer(
     key: string,
     picked: string,
-    correct: boolean
+    correct: boolean,
+    problem?: PracticeProblem,
+    group?: PracticeGroup,
+    moduleTitle?: string
   ) {
     setAnswers((prev) => {
       const next = { ...prev, [key]: { picked, correct } };
       reportTotals(next);
       return next;
     });
+    if (problem && group) {
+      onAnswer?.({
+        source: "practice",
+        moduleTitle: moduleTitle ?? "",
+        conceptTitle: group.conceptTitle,
+        question: problem.question,
+        picked,
+        correctAnswer: problem.correctAnswer,
+        explanation: problem.explanation,
+        correct,
+      });
+    }
   }
 
   if (groups.length === 0) return null;
 
-  function submitShortAnswer(key: string, problem: PracticeProblem) {
+  function submitShortAnswer(
+    key: string,
+    problem: PracticeProblem,
+    group?: PracticeGroup,
+    moduleTitle?: string
+  ) {
     const typed = drafts[key] ?? "";
     if (!typed.trim()) return;
-    recordAnswer(key, typed.trim(), normalize(typed) === normalize(problem.correctAnswer));
+    recordAnswer(
+      key,
+      typed.trim(),
+      normalize(typed) === normalize(problem.correctAnswer),
+      problem,
+      group,
+      moduleTitle
+    );
   }
 
   return (
@@ -127,7 +165,7 @@ export default function TargetedPractice({
       <div>
         <h2 className="text-xl font-extrabold tracking-tight">Targeted practice</h2>
         <p className="mt-1 text-sm leading-relaxed text-ink-400">
-          Three problems per concept. Wrong answers open the AI Tutor with a
+          Practice problems per concept. Wrong answers open the AI Tutor with a
           step-by-step breakdown.
         </p>
       </div>
@@ -189,7 +227,14 @@ export default function TargetedPractice({
                               key={opt}
                               type="button"
                               onClick={() =>
-                                recordAnswer(key, opt, opt === problem.correctAnswer)
+                                recordAnswer(
+                                  key,
+                                  opt,
+                                  opt === problem.correctAnswer,
+                                  problem,
+                                  group,
+                                  modules[moduleIdx]?.title
+                                )
                               }
                               disabled={!!answer}
                               className={`option-btn ${cls}`}
@@ -213,7 +258,8 @@ export default function TargetedPractice({
                             setDrafts((prev) => ({ ...prev, [key]: e.target.value }))
                           }
                           onKeyDown={(e) => {
-                            if (e.key === "Enter") submitShortAnswer(key, problem);
+                            if (e.key === "Enter")
+                              submitShortAnswer(key, problem, group, modules[moduleIdx]?.title);
                           }}
                           disabled={!!answer}
                           placeholder="Type your answer…"
@@ -221,7 +267,9 @@ export default function TargetedPractice({
                         />
                         <button
                           type="button"
-                          onClick={() => submitShortAnswer(key, problem)}
+                          onClick={() =>
+                            submitShortAnswer(key, problem, group, modules[moduleIdx]?.title)
+                          }
                           disabled={!!answer || !(drafts[key] ?? "").trim()}
                           className="btn-primary"
                         >

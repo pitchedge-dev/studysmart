@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   Brain,
   CheckCircle2,
+  Flame,
+  Heart,
   Layers,
   LayoutTemplate,
   Loader2,
@@ -15,9 +17,12 @@ import {
   Timer,
   Trophy,
   Users,
+  Volume2,
+  VolumeX,
   XCircle,
 } from "lucide-react";
 import TutorPanel from "./TutorPanel";
+import { playArenaSound } from "@/lib/arenaSound";
 import {
   getMyProfile,
   saveGuideToAccount,
@@ -69,6 +74,45 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+/** Game length: Quick 10 / Standard 20 (default) / Marathon 30. */
+type GameLength = 10 | 20 | 30;
+const GAME_LENGTHS: { value: GameLength; label: string; hint: string }[] = [
+  { value: 10, label: "Quick", hint: "10 questions" },
+  { value: 20, label: "Standard", hint: "20 questions" },
+  { value: 30, label: "Marathon", hint: "30 questions" },
+];
+
+type PlayerStats = {
+  correct: number;
+  answered: number;
+  bestStreak: number;
+  bonus: number;
+};
+const emptyStats = (n: number): PlayerStats[] =>
+  Array.from({ length: n }, () => ({
+    correct: 0,
+    answered: 0,
+    bestStreak: 0,
+    bonus: 0,
+  }));
+
+/** Rank title for the results screen, from accuracy + best streak. */
+function rankFor(accuracy: number, bestStreak: number): string {
+  if (accuracy >= 0.9 && bestStreak >= 5) return "Arena Legend";
+  if (accuracy >= 0.75) return "Arena Champion";
+  if (accuracy >= 0.5) return "Rising Challenger";
+  return "Brave Rookie";
+}
+
+const CONFETTI_COLORS = [
+  "#6366f1",
+  "#f59e0b",
+  "#10b981",
+  "#f43f5e",
+  "#8b5cf6",
+  "#facc15",
+];
+
 export default function BattleArena({
   guideTopic,
   guideContent,
@@ -110,6 +154,23 @@ export default function BattleArena({
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [timedOut, setTimedOut] = useState(false);
 
+  // Bigger, more immersive games: length choice, sound, lives, streaks.
+  const [gameLength, setGameLength] = useState<GameLength>(20);
+  const [muted, setMuted] = useState<boolean>(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem("studysmart-arena-muted") === "1"
+  );
+  const [lives, setLives] = useState(3);
+  const [streaks, setStreaks] = useState<number[]>([0]);
+  const [playerStats, setPlayerStats] = useState<PlayerStats[]>(emptyStats(1));
+  const [lastAward, setLastAward] = useState<{
+    base: number;
+    speed: number;
+    combo: number;
+    total: number;
+  } | null>(null);
+
   // Flashcards state
   const [cardIndex, setCardIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -136,18 +197,44 @@ export default function BattleArena({
   const hasCards = !!game?.cards && game.cards.length > 0;
   const timedSeconds = game?.timedSecondsPerQuestion;
 
-  // Load a saved / published game passed in from Your Study Guides or Browse.
+  // Confetti pieces for the results screen — deterministic positions, so
+  // every render shows the same celebration (CSS animation only).
+  const confettiPieces = useMemo(
+    () =>
+      Array.from({ length: 36 }, (_, i) => ({
+        left: (i * 37 + 11) % 100,
+        delay: ((i * 13) % 10) / 10,
+        duration: 2.2 + ((i * 7) % 10) / 10,
+        size: 6 + ((i * 5) % 8),
+        color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+        round: i % 3 === 0,
+      })),
+    []
+  );
+
+  // Persist the mute preference.
   useEffect(() => {
-    if (!initialGame) return;
-    const g = initialGame;
-    setGame(g);
-    setPlayMode("trivia");
+    try {
+      window.localStorage.setItem(
+        "studysmart-arena-muted",
+        muted ? "1" : "0"
+      );
+    } catch {
+      // Storage unavailable — the preference just won't persist.
+    }
+  }, [muted]);
+
+  // Reset everything about a play-through (scores, lives, streaks, stats).
+  function resetPlayState(playerN: number) {
     setCurrent(0);
-    setScores(Array(playerCount).fill(0));
+    setScores(Array(playerN).fill(0));
     setTurn(0);
     setSelected(null);
     setFinished(false);
-    setTimeLeft(g.timedSecondsPerQuestion ?? null);
+    setLives(3);
+    setStreaks(Array(playerN).fill(0));
+    setPlayerStats(emptyStats(playerN));
+    setLastAward(null);
     setTimedOut(false);
     setCardIndex(0);
     setFlipped(false);
@@ -157,6 +244,16 @@ export default function BattleArena({
     setPickedBack(null);
     setMatchScore(0);
     setMatchMessage(null);
+  }
+
+  // Load a saved / published game passed in from Your Study Guides or Browse.
+  useEffect(() => {
+    if (!initialGame) return;
+    const g = initialGame;
+    setGame(g);
+    setPlayMode("trivia");
+    resetPlayState(playerCount);
+    setTimeLeft(g.timedSecondsPerQuestion ?? null);
     setTemplates(null);
     setChosenTemplate(null);
     setTemplatesError(null);
@@ -236,7 +333,7 @@ export default function BattleArena({
           step: "full",
           chosenTemplate: template,
           playerCount,
-          questionCount: 10,
+          questionCount: gameLength,
           topicType,
         }),
       });
@@ -245,20 +342,8 @@ export default function BattleArena({
       const g = data as GameData;
       setGame(g);
       setPlayMode("trivia");
-      setCurrent(0);
-      setScores(Array(playerCount).fill(0));
-      setTurn(0);
-      setSelected(null);
+      resetPlayState(playerCount);
       setTimeLeft(g.timedSecondsPerQuestion ?? null);
-      setTimedOut(false);
-      setCardIndex(0);
-      setFlipped(false);
-      setKnownCount(0);
-      setMatched(new Set());
-      setPickedFront(null);
-      setPickedBack(null);
-      setMatchScore(0);
-      setMatchMessage(null);
       // Signed in? Save the game to the account automatically.
       void saveGameToAccount(g, templatesSource);
     } catch (e) {
@@ -275,43 +360,126 @@ export default function BattleArena({
     setError(null);
   }
 
-  // Timer for timed games (trivia mode only)
+  // Timer for timed games (trivia mode only): counts down once per second.
   useEffect(() => {
     if (!game || playMode !== "trivia" || !timedSeconds || selected || finished) return;
     setTimeLeft(timedSeconds);
     const id = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev === null) return prev;
-        if (prev <= 1) {
-          clearInterval(id);
-          setTimedOut(true);
-          setSelected("__timeout__");
-          return 0;
-        }
-        return prev - 1;
-      });
+      setTimeLeft((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game, playMode, current, finished]);
+
+  // Time ran out on this question: counts as a miss — streak lost, a life lost.
+  useEffect(() => {
+    if (timeLeft !== 0 || selected || !game || playMode !== "trivia" || finished)
+      return;
+    setTimedOut(true);
+    setSelected("__timeout__");
+    setLastAward(null);
+    setStreaks((prev) => {
+      const next = [...prev];
+      next[turn] = 0;
+      return next;
+    });
+    setPlayerStats((prev) =>
+      prev.map((s, i) => (i === turn ? { ...s, answered: s.answered + 1 } : s))
+    );
+    setLives((prev) => Math.max(0, prev - 1));
+    playArenaSound("wrong", muted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
+
+  // Urgency tick when the timer is almost out.
+  useEffect(() => {
+    if (
+      timeLeft !== null &&
+      timeLeft <= 5 &&
+      timeLeft > 0 &&
+      !selected &&
+      game &&
+      playMode === "trivia" &&
+      !finished
+    ) {
+      playArenaSound("tick", muted);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
+
+  // Win fanfare when the game ends on a strong performance.
+  useEffect(() => {
+    if (!finished || !game) return;
+    const top = playerStats.reduce(
+      (best, s) => Math.max(best, s.answered ? s.correct / s.answered : 0),
+      0
+    );
+    if (top >= 0.7) playArenaSound("win", muted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finished]);
 
   function pick(option: string) {
     if (selected || !game) return;
     const q = game.questions[current];
     setSelected(option);
     if (option === q.correctAnswer) {
+      // Points scale with speed (up to +50% of the base for a fast answer)
+      // and streaks pay a combo bonus: 3 in a row = +25, 4 = +50, and so on.
+      const speedBonus =
+        timedSeconds && timeLeft !== null
+          ? Math.round(q.points * 0.5 * (timeLeft / timedSeconds))
+          : 0;
+      const newStreak = (streaks[turn] ?? 0) + 1;
+      const comboBonus = newStreak >= 3 ? 25 * (newStreak - 2) : 0;
+      const total = q.points + speedBonus + comboBonus;
+      setLastAward({ base: q.points, speed: speedBonus, combo: comboBonus, total });
       setScores((prev) => {
         const next = [...prev];
-        next[turn] += q.points;
+        next[turn] += total;
         return next;
       });
+      setStreaks((prev) => {
+        const next = [...prev];
+        next[turn] = newStreak;
+        return next;
+      });
+      setPlayerStats((prev) =>
+        prev.map((s, i) =>
+          i === turn
+            ? {
+                ...s,
+                correct: s.correct + 1,
+                answered: s.answered + 1,
+                bestStreak: Math.max(s.bestStreak, newStreak),
+                bonus: s.bonus + speedBonus + comboBonus,
+              }
+            : s
+        )
+      );
+      playArenaSound("correct", muted);
+    } else {
+      // A miss breaks the streak and costs a life.
+      setLastAward(null);
+      setStreaks((prev) => {
+        const next = [...prev];
+        next[turn] = 0;
+        return next;
+      });
+      setPlayerStats((prev) =>
+        prev.map((s, i) =>
+          i === turn ? { ...s, answered: s.answered + 1 } : s
+        )
+      );
+      setLives((prev) => Math.max(0, prev - 1));
+      playArenaSound("wrong", muted);
     }
   }
 
   function nextQuestion() {
     if (!game) return;
     setTimedOut(false);
-    if (current + 1 >= game.questions.length) {
+    setLastAward(null);
+    if (current + 1 >= game.questions.length || lives <= 0) {
       setFinished(true);
     } else {
       setCurrent(current + 1);
@@ -320,19 +488,21 @@ export default function BattleArena({
     }
   }
 
+  function replayGame() {
+    if (!game) return;
+    resetPlayState(playerCount);
+    setTimeLeft(game.timedSecondsPerQuestion ?? null);
+  }
+
   function restart() {
     setGame(null);
     setTemplates(null);
     setChosenTemplate(null);
     setTemplatesError(null);
     setError(null);
-    setCurrent(0);
-    setScores([0]);
-    setTurn(0);
-    setSelected(null);
-    setFinished(false);
+    setGameSavedNote(null);
+    resetPlayState(1);
     setTimeLeft(null);
-    setTimedOut(false);
   }
 
   function pickMatch(frontIdx: number | null, backIdx: number | null) {
@@ -347,8 +517,10 @@ export default function BattleArena({
       setMatched((prev) => new Set([...prev, f]));
       setMatchScore((s) => s + 100);
       setMatchMessage("Match! Nice work.");
+      playArenaSound("match", muted);
     } else {
       setMatchMessage("Not a match — try again.");
+      playArenaSound("wrong", muted);
     }
     setPickedFront(null);
     setPickedBack(null);
@@ -357,6 +529,15 @@ export default function BattleArena({
   const question = game?.questions[current];
   const cards = game?.cards ?? [];
   const matchDone = cards.length > 0 && matched.size === cards.length;
+  const rankedPlayers = playerStats
+    .map((s, i) => ({
+      player: i + 1,
+      score: scores[i] ?? 0,
+      ...s,
+      accuracy: s.answered ? s.correct / s.answered : 0,
+    }))
+    .sort((a, b) => b.score - a.score);
+  const showConfetti = finished && (rankedPlayers[0]?.accuracy ?? 0) >= 0.7;
 
   return (
     <div className="card p-5 sm:p-6">
@@ -371,6 +552,20 @@ export default function BattleArena({
             the full game for you.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setMuted((m) => !m)}
+          className="btn-ghost ml-auto"
+          aria-label={muted ? "Turn sound on" : "Mute sound"}
+          title={muted ? "Turn sound on" : "Mute sound"}
+        >
+          {muted ? (
+            <VolumeX className="h-4 w-4" />
+          ) : (
+            <Volume2 className="h-4 w-4" />
+          )}
+          <span className="hidden sm:inline">{muted ? "Muted" : "Sound"}</span>
+        </button>
       </div>
 
       {!game && !loading && !templates && !templatesLoading && (
@@ -427,6 +622,31 @@ export default function BattleArena({
               <Play className="h-4 w-4" /> Generate Game
             </button>
           </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-ink-400">
+              Game length
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {GAME_LENGTHS.map((l) => (
+                <button
+                  key={l.value}
+                  type="button"
+                  onClick={() => setGameLength(l.value)}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ${
+                    gameLength === l.value
+                      ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
+                      : "bg-ink-100 text-ink-700 hover:bg-ink-200"
+                  }`}
+                >
+                  {l.label} · {l.hint}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-ink-400">
+              Standard is 20 questions. Marathon builds in two parts and can
+              take a little longer.
+            </p>
+          </div>
           {(error || templatesError) && (
             <div className="feedback-wrong mt-3 font-medium">
               {error || templatesError}
@@ -445,7 +665,7 @@ export default function BattleArena({
               </h3>
               <p className="text-sm text-ink-400">
                 Three quick ideas for your topic — choose one and the AI will
-                finish the full game.
+                finish the full {gameLength}-question game.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -566,10 +786,14 @@ export default function BattleArena({
           <Brain className="h-12 w-12 text-brand-600" />
           <div>
             <p className="text-lg font-semibold">
-              Building your game{chosenTemplate ? ` — ${chosenTemplate.title}` : ""}…
+              Building your {gameLength}-question game
+              {chosenTemplate ? ` — ${chosenTemplate.title}` : ""}…
             </p>
             <p className="text-sm text-ink-400">
               Finishing the full game from the style you picked.
+              {gameLength > 10
+                ? " Longer games build in parts — sit tight."
+                : ""}
             </p>
           </div>
           <div className="flex gap-2">
@@ -625,7 +849,7 @@ export default function BattleArena({
           </div>
 
           {playMode === "trivia" && question && (
-            <div className="mt-4">
+            <div key={current} className="arena-slide-in mt-4">
               <div className="progress-track mt-3">
                 <div
                   className="progress-fill"
@@ -647,8 +871,36 @@ export default function BattleArena({
                     Player {i + 1}: {s} pts
                   </span>
                 ))}
-                {timedSeconds && timeLeft !== null && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-100"
+                  title="Wrong answers and time-outs cost a life"
+                >
+                  {[0, 1, 2].map((i) => (
+                    <Heart
+                      key={i}
+                      className={`h-3.5 w-3.5 ${
+                        i < lives
+                          ? "fill-rose-500 text-rose-500"
+                          : "text-rose-200"
+                      }`}
+                    />
+                  ))}
+                  {lives} {lives === 1 ? "life" : "lives"}
+                </span>
+                {streaks[turn] >= 2 && (
                   <span className="chip-amber">
+                    <Flame className="h-3.5 w-3.5" /> {streaks[turn]} in a
+                    row — combo bonus!
+                  </span>
+                )}
+                {timedSeconds && timeLeft !== null && (
+                  <span
+                    className={
+                      timeLeft <= 5
+                        ? "inline-flex animate-pulse items-center gap-1 rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-200"
+                        : "chip-amber"
+                    }
+                  >
                     <Timer className="h-3.5 w-3.5" /> {timeLeft}s left
                   </span>
                 )}
@@ -662,8 +914,8 @@ export default function BattleArena({
                   const isPicked = opt === selected;
                   let cls = "";
                   if (selected) {
-                    if (isCorrect) cls = "option-correct";
-                    else if (isPicked) cls = "option-wrong";
+                    if (isCorrect) cls = "option-correct arena-flash";
+                    else if (isPicked) cls = "option-wrong arena-shake";
                     else cls = "option-dimmed";
                   }
                   return (
@@ -695,19 +947,34 @@ export default function BattleArena({
                   <p>
                     <strong>Explanation:</strong> {question.explanation}
                   </p>
-                  <p className="mt-1.5 text-xs font-medium text-ink-400">
-                    Worth {question.points} points ·{" "}
-                    {selected === question.correctAnswer
-                      ? "Correct — nice work!"
-                      : "Not quite — the correct answer is highlighted above."}
-                  </p>
+                  {timedOut ? (
+                    <p className="mt-1.5 text-xs font-medium text-ink-400">
+                      A life is lost — answer faster next time!
+                    </p>
+                  ) : selected === question.correctAnswer && lastAward ? (
+                    <p className="mt-1.5 text-xs font-medium text-ink-400">
+                      +{lastAward.base} base
+                      {lastAward.speed > 0
+                        ? ` · +${lastAward.speed} speed bonus`
+                        : ""}
+                      {lastAward.combo > 0
+                        ? ` · +${lastAward.combo} streak bonus`
+                        : ""}{" "}
+                      = +{lastAward.total} points — correct, nice work!
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-xs font-medium text-ink-400">
+                      Not quite — the correct answer is highlighted above. A
+                      life is lost.
+                    </p>
+                  )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={nextQuestion}
                       className="btn-primary"
                     >
-                      {current + 1 >= game.questions.length
+                      {current + 1 >= game.questions.length || lives <= 0
                         ? "See Results"
                         : "Next Question"}
                     </button>
@@ -840,33 +1107,73 @@ export default function BattleArena({
       )}
 
       {game && finished && playMode === "trivia" && (
-        <div className="mt-6 text-center">
+        <div className="arena-pop relative mt-6 overflow-hidden rounded-2xl border border-ink-100 bg-white p-6 text-center shadow-card">
+          {showConfetti && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 overflow-hidden"
+            >
+              {confettiPieces.map((p, i) => (
+                <span
+                  key={i}
+                  className="arena-confetti absolute top-0"
+                  style={{
+                    left: `${p.left}%`,
+                    width: p.size,
+                    height: p.round ? p.size : p.size * 0.5,
+                    backgroundColor: p.color,
+                    borderRadius: p.round ? "50%" : "2px",
+                    animationDelay: `${p.delay}s`,
+                    animationDuration: `${p.duration}s`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
           <Trophy className="mx-auto h-12 w-12 text-amber-500" />
-          <h3 className="mt-2 text-2xl font-extrabold tracking-tight">Game Over!</h3>
+          <h3 className="mt-2 text-2xl font-extrabold tracking-tight">
+            {lives <= 0 ? "Out of Lives!" : "Game Over!"}
+          </h3>
           <p className="text-sm font-medium text-ink-400">{game.title}</p>
-          <div className="mx-auto mt-4 max-w-sm space-y-2">
-            {scores
-              .map((s, i) => ({ player: i + 1, score: s }))
-              .sort((a, b) => b.score - a.score)
-              .map((row, rank) => (
-                <div
-                  key={row.player}
-                  className="flex items-center justify-between rounded-xl border border-ink-100 bg-white px-4 py-2.5 text-sm shadow-sm"
-                >
-                  <span className="font-medium">
+          {rankedPlayers[0] && (
+            <p className="mt-2">
+              <span className="chip-amber">
+                <Sparkles className="h-3.5 w-3.5" /> Player{" "}
+                {rankedPlayers[0].player}:{" "}
+                {rankFor(
+                  rankedPlayers[0].accuracy,
+                  rankedPlayers[0].bestStreak
+                )}
+              </span>
+            </p>
+          )}
+          <div className="mx-auto mt-4 max-w-md space-y-2 text-left">
+            {rankedPlayers.map((row, rank) => (
+              <div
+                key={row.player}
+                className="rounded-xl border border-ink-100 bg-white px-4 py-3 text-sm shadow-sm"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold">
                     {rank === 0 ? "Winner — " : ""}Player {row.player}
                   </span>
-                  <span className="font-bold">{row.score} pts</span>
+                  <span className="font-extrabold">{row.score} pts</span>
                 </div>
-              ))}
+                <p className="mt-1 text-xs font-medium text-ink-400">
+                  {row.correct} of {row.answered} correct ·{" "}
+                  {Math.round(row.accuracy * 100)}% accuracy · best streak{" "}
+                  {row.bestStreak}
+                  {row.bonus > 0 ? ` · +${row.bonus} bonus pts` : ""}
+                </p>
+              </div>
+            ))}
           </div>
-          <div className="mt-4 flex justify-center gap-2">
-            <button
-              type="button"
-              onClick={restart}
-              className="btn-primary"
-            >
-              <RotateCcw className="h-4 w-4" /> Play Again
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <button type="button" onClick={replayGame} className="btn-primary">
+              <RotateCcw className="h-4 w-4" /> Replay this game
+            </button>
+            <button type="button" onClick={restart} className="btn-secondary">
+              <Play className="h-4 w-4" /> New Game
             </button>
           </div>
         </div>

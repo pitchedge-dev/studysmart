@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
+  getLiteModels,
   getModels,
   isOverloadedError,
   MISSING_KEY_MESSAGE,
@@ -74,6 +75,24 @@ const ConceptSchema = z.object({
     .optional()
     .describe(
       "A common mistake to avoid, or a helpful tip, for this concept — only when one genuinely applies to the supplied material."
+    ),
+  explanation: z
+    .string()
+    .optional()
+    .describe(
+      "A full explanation of this concept in plain language — how it works and why it matters, in two to four sentences, taken from the supplied material."
+    ),
+  commonMistake: z
+    .string()
+    .optional()
+    .describe(
+      "The most common mistake students make with this concept and how to avoid it, taken from the supplied material. Include one whenever a real mistake applies."
+    ),
+  memoryTip: z
+    .string()
+    .optional()
+    .describe(
+      "A short memory aid for this concept — a mnemonic, an image, or a way to remember it — derived from the supplied material."
     ),
 });
 
@@ -148,8 +167,8 @@ const ModuleSchema = z.object({
   concepts: z
     .array(ConceptSchema)
     .min(1)
-    .max(4)
-    .describe("The concepts in this module, in learning order, taken from the supplied material. At most 4."),
+    .max(6)
+    .describe("The concepts in this module, in learning order, taken from the supplied material. At most 6."),
   coreIdeas: z
     .array(z.string())
     .min(1)
@@ -168,6 +187,48 @@ const ModuleSchema = z.object({
     .describe(
       "Targeted practice: one group per concept in this module, each with up to three problems for that concept."
     ),
+});
+
+const FaqItemSchema = z.object({
+  question: z
+    .string()
+    .describe("A question a student would actually ask about this topic, derived from the supplied material."),
+  answer: z
+    .string()
+    .describe("A clear, direct answer to the question, derived from the supplied material."),
+});
+
+/**
+ * Guide-level finishing sections, generated in a second, lighter pass
+ * after the core modules land — so a deep guide still fits the 60s
+ * function timeout. Everything here is derived strictly from the guide
+ * content, never invented. Best effort: if this pass fails, the core
+ * guide is still returned complete.
+ */
+const EnrichmentSchema = z.object({
+  objectives: z
+    .array(z.string())
+    .min(1)
+    .max(6)
+    .describe("What the student will be able to do after studying this guide — 3 to 6 clear learning objectives."),
+  cheatSheet: z
+    .string()
+    .describe(
+      "A one-page cheat sheet in Markdown: the essential definitions, formulas, and steps from the whole guide, nothing else — the page a student glances at right before the test."
+    ),
+  realWorldApplications: z
+    .array(z.string())
+    .min(1)
+    .max(5)
+    .describe("Where this topic actually shows up in real life — 3 to 5 concrete applications, derived from the supplied material."),
+  faq: z
+    .array(FaqItemSchema)
+    .min(1)
+    .max(6)
+    .describe("Frequently asked questions a student would actually ask about this topic, with clear answers — 4 to 6."),
+  finalReview: CheckpointSchema.describe(
+    "A final review quiz covering the whole guide — aim for 10 questions, each with options, the correct answer, and an explanation."
+  ),
 });
 
 const GenerateResultSchema = z.object({
@@ -200,9 +261,9 @@ const GenerateResultSchema = z.object({
           .describe("A short definition of the term, from the supplied material."),
       })
     )
-    .max(12)
+    .max(20)
     .describe(
-      "The key terms of the topic with short definitions, taken from the supplied material. At most 12."
+      "The key terms of the topic with short definitions, taken from the supplied material — the guide's glossary. At most 20."
     ),
   keyConcepts: z
     .array(z.string())
@@ -216,15 +277,37 @@ const GenerateResultSchema = z.object({
   modules: z
     .array(ModuleSchema)
     .min(1)
-    .max(3)
+    .max(6)
     .describe(
-      "The study material organised into up to 3 modules, each with concept cards and targeted practice."
+      "The study material organised into up to 6 modules, each with concept cards and targeted practice. Use as many modules as the material supports — a complete guide, not a summary."
     ),
   quiz: z
     .array(QuizQuestionSchema)
     .max(6)
     .optional()
     .describe("Multiple-choice practice questions, only when a quiz was requested. At most 6."),
+  objectives: z
+    .array(z.string())
+    .max(6)
+    .optional()
+    .describe("Learning objectives for the whole guide — filled in by the enrichment pass."),
+  cheatSheet: z
+    .string()
+    .optional()
+    .describe("A one-page cheat sheet in Markdown — filled in by the enrichment pass."),
+  realWorldApplications: z
+    .array(z.string())
+    .max(5)
+    .optional()
+    .describe("Real-world applications of the topic — filled in by the enrichment pass."),
+  faq: z
+    .array(FaqItemSchema)
+    .max(6)
+    .optional()
+    .describe("Frequently asked questions with answers — filled in by the enrichment pass."),
+  finalReview: CheckpointSchema.optional().describe(
+    "A final review quiz covering the whole guide — filled in by the enrichment pass."
+  ),
 });
 
 // Simplified fallback shape, used once if the full shape fails to validate:
@@ -368,7 +451,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join(" ");
 
-    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} Organise the material into up to 3 modules, with up to 4 concepts per module, and include at most one checkpoint in the whole guide. Cover the input topic in depth: never drop a topic from the supplied material, and let depth scale with the input — short notes get a focused guide, long notes get full coverage of everything in them. Never pad with unrelated material and never invent content beyond the input. Start the guide with a short summary of two or three sentences, and include a key-terms list with short definitions. Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with up to three problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, and one worked example, plus a common-mistake or tip where one genuinely applies; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Keep the whole response compact enough to fit: short explanations, short examples, short practice questions.`;
+    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} This guide must be a COMPLETE, self-contained resource on the topic — thorough enough to stand on its own as a mini study site, not a summary. Organise the material into as many modules as the material supports, up to 6 modules, with up to 6 concepts per module, and include at most one checkpoint in the whole guide. Cover the input topic in depth: never drop a topic from the supplied material, and let depth scale with the input — short notes get a focused but complete guide, long notes get full coverage of everything in them. Never pad with unrelated material and never invent content beyond the input. Start the guide with a short summary of two or three sentences, and include a key-terms glossary with short definitions (up to 20 terms). Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with two problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, a full plain-language explanation of how it works and why it matters (two to four sentences), one worked example, the most common mistake students make with it and how to avoid it, and a short memory tip; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Do NOT include learning objectives, a cheat sheet, real-world applications, a FAQ, or a final review quiz in this pass — those are added later. Keep every field tight so the whole guide fits: short sentences, no repetition, no filler — every sentence earns its place.`;
 
     const textPart = hasText
       ? `User-supplied material:\n\n${text}`
@@ -386,12 +469,21 @@ export async function POST(req: NextRequest) {
 
     // Walk the model fallback chain. Each model is tried at most once per
     // shape — retrying the same overloaded model just burns its free quota.
-    // Each attempt is capped at 20s (the free-tier models can stall under
+    // Each attempt is capped at 25s (the free-tier models can stall under
     // load) and the whole loop at 3 attempts, so the request stays inside
     // the 60s function timeout. A real guide in the simpler shape beats a 500.
+    //
+    // Generation runs in two batches behind one loading state:
+    //  1. Core pass — the deep modules, concepts, practice, and quiz.
+    //  2. Enrichment pass (best effort, Lite models, 15s cap) — learning
+    //     objectives, cheat sheet, real-world applications, FAQ, and the
+    //     final review quiz, derived from the core guide. If it fails or
+    //     time is short, the core guide is still returned complete.
+    const startedAt = Date.now();
     const simplePrompt = `${systemPrompt} IMPORTANT — simplified shape for this attempt: return at most 2 modules with at most 3 concepts each, concept cards with targeted practice only. Do NOT include a checkpoint, a reasoning example, or core ideas in this attempt. Keep everything short.`;
     let lastErr: unknown = null;
     let attempts = 0;
+    let core: z.infer<typeof GenerateResultSchema> | null = null;
     for (const model of models) {
       if (attempts >= 3) break;
       try {
@@ -401,21 +493,12 @@ export async function POST(req: NextRequest) {
           schema: GenerateResultSchema,
           system: systemPrompt,
           messages: [{ role: "user", content }],
-          maxTokens: 4096,
+          maxTokens: 8192,
           maxRetries: 0,
           abortSignal: AbortSignal.timeout(25000),
         });
-        return NextResponse.json({
-          topicType: object.topicType,
-          languageCode: object.languageCode,
-          guideTitle: object.guideTitle,
-          studyGuide: object.studyGuide,
-          summary: object.summary,
-          keyTerms: object.keyTerms ?? [],
-          keyConcepts: object.keyConcepts ?? [],
-          modules: object.modules ?? [],
-          quiz: includeQuiz ? object.quiz ?? [] : undefined,
-        });
+        core = object;
+        break;
       } catch (fullErr) {
         lastErr = fullErr;
         logError("[/api/generate] full-shape attempt failed:", fullErr);
@@ -432,20 +515,14 @@ export async function POST(req: NextRequest) {
             maxRetries: 0,
             abortSignal: AbortSignal.timeout(25000),
           });
-          return NextResponse.json({
-            topicType: object.topicType,
-            languageCode: object.languageCode,
-            guideTitle: object.guideTitle,
-            studyGuide: object.studyGuide,
-            summary: object.summary,
-            keyTerms: object.keyTerms ?? [],
-            keyConcepts: object.keyConcepts ?? [],
+          core = {
+            ...object,
             modules: (object.modules ?? []).map((m) => ({
               ...m,
               format: m.format ?? "mixed",
             })),
-            quiz: includeQuiz ? object.quiz ?? [] : undefined,
-          });
+          } as z.infer<typeof GenerateResultSchema>;
+          break;
         } catch (simpleErr) {
           lastErr = simpleErr;
           logError("[/api/generate] simplified-shape attempt failed:", simpleErr);
@@ -454,14 +531,74 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Every model in the chain failed.
-    if (isOverloadedError(lastErr)) {
-      return NextResponse.json(
-        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
-        { status: 503 }
-      );
+    if (!core) {
+      // Every model in the chain failed.
+      if (isOverloadedError(lastErr)) {
+        return NextResponse.json(
+          { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+          { status: 503 }
+        );
+      }
+      throw lastErr;
     }
-    throw lastErr;
+
+    // Batch 2 — enrichment, best effort only. Never fail the request for it.
+    let enrichment: z.infer<typeof EnrichmentSchema> | null = null;
+    if (Date.now() - startedAt < 35000) {
+      const coreOutline = [
+        `Guide title: ${core.guideTitle}`,
+        core.summary ? `Summary: ${core.summary}` : "",
+        `Modules: ${(core.modules ?? [])
+          .map(
+            (m) =>
+              `${m.moduleNumber}. ${m.title} — ${m.concepts
+                .map((c) => c.title)
+                .join(", ")}`
+          )
+          .join("; ")}`,
+        `Key terms: ${(core.keyTerms ?? []).map((t) => t.term).join(", ")}`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const enrichmentPrompt = `You are StudySMART. The study guide below was just generated from a student's notes. Add the finishing sections for it, derived STRICTLY from the guide content below — do not invent new facts, do not add topics that are not in the guide. Write 3 to 6 learning objectives (what the student will be able to do after studying this guide), a one-page cheat sheet in Markdown (only the essential definitions, formulas, and steps from the whole guide — the page a student glances at right before the test), 3 to 5 real-world applications (where this topic actually shows up in real life), 4 to 6 frequently asked questions a student would actually ask, with clear direct answers, and a final review quiz of 5 to 10 multiple-choice questions covering the whole guide, each with options, the correct answer, and an explanation of why the correct answer works.\n\n${coreOutline}`;
+      for (const liteModel of getLiteModels()) {
+        if (Date.now() - startedAt >= 45000) break;
+        try {
+          const { object } = await generateObject({
+            model: liteModel,
+            schema: EnrichmentSchema,
+            system: enrichmentPrompt,
+            messages: [{ role: "user", content: "Add the finishing sections for this guide." }],
+            maxTokens: 2048,
+            maxRetries: 0,
+            abortSignal: AbortSignal.timeout(15000),
+          });
+          enrichment = object;
+          break;
+        } catch (enrichErr) {
+          logError("[/api/generate] enrichment attempt failed:", enrichErr);
+          continue;
+        }
+      }
+    }
+
+    return NextResponse.json({
+      topicType: core.topicType,
+      languageCode: core.languageCode,
+      guideTitle: core.guideTitle,
+      studyGuide: core.studyGuide,
+      summary: core.summary,
+      keyTerms: core.keyTerms ?? [],
+      keyConcepts: core.keyConcepts ?? [],
+      modules: core.modules ?? [],
+      quiz: includeQuiz ? core.quiz ?? [] : undefined,
+      objectives: enrichment?.objectives ?? core.objectives ?? [],
+      cheatSheet: enrichment?.cheatSheet ?? core.cheatSheet,
+      realWorldApplications:
+        enrichment?.realWorldApplications ?? core.realWorldApplications ?? [],
+      faq: enrichment?.faq ?? core.faq ?? [],
+      finalReview: enrichment?.finalReview ?? core.finalReview,
+    });
   } catch (err) {
     logError("[/api/generate] error:", err);
     return NextResponse.json(
