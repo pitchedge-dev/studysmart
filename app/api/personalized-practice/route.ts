@@ -28,8 +28,9 @@ const PersonalizedQuestionSchema = z.object({
   question: z.string().describe("A fresh practice question on the weak concept. Do not reuse the question the student already missed."),
   options: z
     .array(z.string())
-    .length(4)
-    .describe("Exactly four answer options."),
+    .min(3)
+    .max(4)
+    .describe("Three or four answer options (four preferred)."),
   correctAnswer: z
     .string()
     .describe("The exact text of the correct option, matching one of the options."),
@@ -41,7 +42,7 @@ const PersonalizedQuestionSchema = z.object({
 const PersonalizedPracticeSchema = z.object({
   questions: z
     .array(PersonalizedQuestionSchema)
-    .min(3)
+    .min(1)
     .max(6)
     .describe("Fresh targeted practice questions for the student's weak concepts — two per weak concept, up to six total."),
 });
@@ -109,16 +110,17 @@ export async function POST(req: NextRequest) {
           schema: PersonalizedPracticeSchema,
           system: `You are StudySMART's personalized practice tutor. ${titleHint}${levelHint}The student got these concepts wrong on their own copy of this study guide — build fresh practice that targets exactly those weak spots. Write NEW questions (never reuse the question they already missed), two per weak concept, up to six total. Make the questions directly test the misunderstanding shown by their wrong answer, and explain in each answer why the right answer is right and why their previous wrong answer was wrong. Keep every question and explanation short and at the right level. Do not invent topics beyond these concepts.`,
           prompt: `The student's weak concepts:\n\n${weakText}`,
-          maxTokens: 2048,
-          maxRetries: 0,
-          abortSignal: AbortSignal.timeout(20000),
+          maxTokens: 4096,
+          maxRetries: 2,
+          abortSignal: AbortSignal.timeout(25000),
         });
 
         return NextResponse.json({ questions: object.questions });
       } catch (err) {
         lastErr = err;
         console.error("[/api/personalized-practice] attempt failed:", err);
-        if (!isOverloadedError(err)) break;
+        // Keep walking the fallback chain on ANY failure (including schema
+        // mismatches) — stopping after the first model wastes the chain.
       }
     }
 
