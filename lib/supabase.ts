@@ -48,6 +48,9 @@ export type StudyGuideRow = {
   topic: string;
   education_level?: string | null;
   test_timing?: string | null;
+  /** Optional course label (migration 0006). Null = Uncategorized.
+   *  Undefined when the column has not been applied live yet. */
+  course?: string | null;
   guide: Record<string, unknown>;
   quiz?: unknown;
   kind: "guide" | "game";
@@ -126,29 +129,47 @@ export async function saveGuideToAccount(args: {
   quiz?: unknown;
   kind?: "guide" | "game";
   game?: Record<string, unknown> | null;
+  /** Optional course label (migration 0006). Null = Uncategorized. */
+  course?: string | null;
 }): Promise<StudyGuideRow | null> {
   const sb = getSupabase();
   if (!sb) return null;
+  const insertRow: Record<string, unknown> = {
+    user_id: args.user.id,
+    topic: args.topic.slice(0, 500),
+    education_level: args.educationLevel || null,
+    test_timing: args.testTiming || null,
+    guide: args.guide,
+    quiz: args.quiz ?? null,
+    kind: args.kind ?? "guide",
+    game: args.game ?? null,
+    author_name: displayNameOf(args.user, args.profile),
+  };
+  if (args.course) insertRow.course = args.course;
   const { data, error } = await sb
     .from("study_guides")
-    .insert({
-      user_id: args.user.id,
-      topic: args.topic.slice(0, 500),
-      education_level: args.educationLevel || null,
-      test_timing: args.testTiming || null,
-      guide: args.guide,
-      quiz: args.quiz ?? null,
-      kind: args.kind ?? "guide",
-      game: args.game ?? null,
-      author_name: displayNameOf(args.user, args.profile),
-    })
+    .insert(insertRow)
     .select()
     .single();
-  if (error) {
-    console.error("[supabase] save guide failed:", error.message);
-    return null;
+  if (!error) return data as StudyGuideRow;
+  // The course column comes from migration 0006, which may not be
+  // applied live yet. If the insert failed because the column does not
+  // exist, retry without it — the guide still gets saved.
+  if (isMissingCourseColumn(error)) {
+    delete insertRow.course;
+    const retry = await sb
+      .from("study_guides")
+      .insert(insertRow)
+      .select()
+      .single();
+    if (retry.error) {
+      console.error("[supabase] save guide failed:", retry.error.message);
+      return null;
+    }
+    return retry.data as StudyGuideRow;
   }
-  return data as StudyGuideRow;
+  console.error("[supabase] save guide failed:", error.message);
+  return null;
 }
 
 /** Fetch one saved guide by id — used by the dedicated guide page
@@ -207,6 +228,85 @@ export async function setGuidePublic(
     .eq("id", id);
   if (error) console.error("[supabase] publish failed:", error.message);
   return !error;
+}
+
+// ---------------------------------------------------------------------------
+// Courses (study_guides.course, migration 0006).
+//
+// A course is a user-typed label on a guide — there is no courses table
+// and no premade list. The helpers below return needsMigration: true
+// when the write failed only because the course column has not been
+// applied live yet, so the UI can say so plainly instead of failing
+// silently. Guides are never deleted by any course operation.
+// ---------------------------------------------------------------------------
+
+export type CourseWriteResult = {
+  ok: boolean;
+  /** True when the write failed only because migration 0006 is not
+   *  applied live yet. The guides themselves are untouched. */
+  needsMigration?: boolean;
+};
+
+function isMissingCourseColumn(error: { code?: string; message?: string }): boolean {
+  return (
+    error.code === "42703" || /column .*course/i.test(error.message ?? "")
+  );
+}
+
+/** Move one guide into a course (null = Uncategorized). */
+export async function setGuideCourse(
+  id: string,
+  course: string | null
+): Promise<CourseWriteResult> {
+  const sb = getSupabase();
+  if (!sb) return { ok: false };
+  const { error } = await sb
+    .from("study_guides")
+    .update({ course: course || null })
+    .eq("id", id);
+  if (!error) return { ok: true };
+  if (isMissingCourseColumn(error)) return { ok: false, needsMigration: true };
+  console.error("[supabase] set guide course failed:", error.message);
+  return { ok: false };
+}
+
+/** Rename a course: every one of the user's guides in the old course
+ *  moves to the new name. Guides are never deleted. */
+export async function renameCourseGuides(
+  userId: string,
+  oldName: string,
+  newName: string
+): Promise<CourseWriteResult> {
+  const sb = getSupabase();
+  if (!sb) return { ok: false };
+  const { error } = await sb
+    .from("study_guides")
+    .update({ course: newName })
+    .eq("user_id", userId)
+    .eq("course", oldName);
+  if (!error) return { ok: true };
+  if (isMissingCourseColumn(error)) return { ok: false, needsMigration: true };
+  console.error("[supabase] rename course failed:", error.message);
+  return { ok: false };
+}
+
+/** Delete a course: its guides move to Uncategorized (course = NULL).
+ *  The guides themselves are never deleted. */
+export async function clearCourseGuides(
+  userId: string,
+  courseName: string
+): Promise<CourseWriteResult> {
+  const sb = getSupabase();
+  if (!sb) return { ok: false };
+  const { error } = await sb
+    .from("study_guides")
+    .update({ course: null })
+    .eq("user_id", userId)
+    .eq("course", courseName);
+  if (!error) return { ok: true };
+  if (isMissingCourseColumn(error)) return { ok: false, needsMigration: true };
+  console.error("[supabase] clear course failed:", error.message);
+  return { ok: false };
 }
 
 export async function listPublicGuides(): Promise<StudyGuideRow[]> {
