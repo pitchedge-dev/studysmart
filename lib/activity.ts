@@ -22,6 +22,8 @@ export const DAILY_GOAL_QUESTIONS = 5;
 export const XP_PER_CORRECT = 10;
 export const XP_PER_SECTION = 15;
 export const XP_PER_MASTERY = 25;
+/** A completed 25-minute focus session (Pomodoro pattern). */
+export const XP_PER_FOCUS_SESSION = 25;
 export const STREAK_MILESTONES = [3, 7, 14, 30];
 
 export type ActivityDay = {
@@ -33,6 +35,10 @@ export type ActivityDay = {
   sectionsCompleted: number;
   conceptsMastered: number;
   arenaGames: number;
+  /** Completed 25-minute focus sessions (Pomodoro). Local only — not a
+   *  column in the study_activity table, so it is never sent to Supabase
+   *  (see syncDayToSupabase). */
+  focusSessions: number;
 };
 
 export type LastGuide = {
@@ -73,6 +79,7 @@ export function emptyDay(date: string): ActivityDay {
     sectionsCompleted: 0,
     conceptsMastered: 0,
     arenaGames: 0,
+    focusSessions: 0,
   };
 }
 
@@ -104,7 +111,8 @@ function isStudyDay(day: ActivityDay | undefined): boolean {
   return (
     day.questionsAnswered > 0 ||
     day.sectionsCompleted > 0 ||
-    day.guidesGenerated > 0
+    day.guidesGenerated > 0 ||
+    (day.focusSessions ?? 0) > 0
   );
 }
 
@@ -184,6 +192,8 @@ async function loadDaysFromSupabase(
         sectionsCompleted: Number(row.sections_completed ?? 0),
         conceptsMastered: Number(row.concepts_mastered ?? 0),
         arenaGames: Number(row.arena_games ?? 0),
+        // focusSessions is local-only; the table has no such column.
+        focusSessions: 0,
       };
     }
     return out;
@@ -245,7 +255,11 @@ export type ActivityApi = {
   /** Mark one finished Battle Arena game (no question counts — those
    *  are recorded per answer, so this never double-counts). */
   recordArenaPlayed: () => void;
+  /** A completed 25-minute focus session (+25 XP, counts as a study day). */
+  recordFocusSession: () => void;
   saveLastGuide: (guide: LastGuide) => void;
+  /** Clear the "continue where you left off" entry (guide unopenable). */
+  clearLastGuide: () => void;
   checklist: { generatedGuide: boolean; answeredFive: boolean; triedArena: boolean };
 };
 
@@ -287,6 +301,7 @@ export function useActivity(userId: string | null): ActivityApi {
                 sectionsCompleted: Math.max(l.sectionsCompleted, r.sectionsCompleted),
                 conceptsMastered: Math.max(l.conceptsMastered, r.conceptsMastered),
                 arenaGames: Math.max(l.arenaGames, r.arenaGames),
+                focusSessions: Math.max(l.focusSessions ?? 0, r.focusSessions ?? 0),
               }
             : r;
         }
@@ -389,6 +404,32 @@ export function useActivity(userId: string | null): ActivityApi {
     });
   }, []);
 
+  /**
+   * Clear the "continue where you left off" entry — used when the saved
+   * guide can no longer be opened by this session (deleted, or private
+   * to another account while signed out), so the home page never points
+   * at a dead guide.
+   */
+  const clearLastGuide = useCallback(() => {
+    setState((prev) => {
+      if (!prev.lastGuide) return prev;
+      const next = { ...prev, lastGuide: null };
+      saveLocal(next);
+      return next;
+    });
+  }, []);
+
+  /** A completed 25-minute focus session: +25 XP, counts as a study day.
+   *  focusSessions is local-only (see ActivityDay) — the Supabase sync
+   *  only sends the table's own columns, so it never breaks. */
+  const recordFocusSession = useCallback(() => {
+    mutate((day) => ({
+      ...day,
+      focusSessions: (day.focusSessions ?? 0) + 1,
+      xp: day.xp + XP_PER_FOCUS_SESSION,
+    }));
+  }, [mutate]);
+
   const streak = computeStreak(state.days);
   const xp = totalXp(state.days);
   const today = state.days[todayKey()] ?? emptyDay(todayKey());
@@ -427,7 +468,9 @@ export function useActivity(userId: string | null): ActivityApi {
     recordConceptMastered,
     recordArenaGame,
     recordArenaPlayed,
+    recordFocusSession,
     saveLastGuide,
+    clearLastGuide,
     checklist: {
       generatedGuide:
         Object.values(state.days).some((d) => d.guidesGenerated > 0) ||

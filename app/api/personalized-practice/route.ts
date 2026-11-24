@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-  getModels,
+  getModelsFor,
   isOverloadedError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
@@ -74,7 +74,9 @@ export async function POST(req: NextRequest) {
     }
     const weak = parsed.data;
 
-    const models = getModels();
+    // Practice routes to the practice category: Gemini first (most
+    // reliable structured output), then Groq (strict JSON), then OpenRouter.
+    const models = getModelsFor("practice");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
@@ -115,7 +117,30 @@ export async function POST(req: NextRequest) {
           abortSignal: AbortSignal.timeout(25000),
         });
 
-        return NextResponse.json({ questions: object.questions });
+        // Normalize: the correct answer MUST match one of the options,
+        // or the frontend cannot score the question. Fix up near-misses
+        // (extra spaces / case) and drop questions that still do not
+        // match — a dropped question is better than an unscorable one.
+        const questions = object.questions
+          .map((qq) => {
+            const options = (qq.options ?? []).map((o) => String(o));
+            const correct = String(qq.correctAnswer ?? "");
+            const exact = options.find((o) => o === correct);
+            if (exact) return { ...qq, options, correctAnswer: exact };
+            const loose = options.find(
+              (o) => o.trim().toLowerCase() === correct.trim().toLowerCase()
+            );
+            if (loose) return { ...qq, options, correctAnswer: loose };
+            return null;
+          })
+          .filter((qq): qq is NonNullable<typeof qq> => qq !== null);
+        if (questions.length === 0) {
+          // Nothing usable — try the next model in the chain.
+          throw new Error(
+            "Model returned practice questions whose answers did not match their options."
+          );
+        }
+        return NextResponse.json({ questions });
       } catch (err) {
         lastErr = err;
         console.error("[/api/personalized-practice] attempt failed:", err);

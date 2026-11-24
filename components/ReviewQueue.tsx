@@ -26,6 +26,41 @@ import EmptyState from "./EmptyState";
 import type { PersonalizedQuestion } from "./PersonalizedPractice";
 
 /**
+ * Interleave questions across concepts (Rohrer et al.): arrange them so
+ * no two consecutive questions test the same concept, when that is
+ * possible. Greedy: always pick the concept with the most questions
+ * left that is not the one just used. Falls back to plain order when
+ * only one concept has questions.
+ */
+export function interleaveQuestions<T extends { conceptTitle: string }>(
+  list: T[]
+): T[] {
+  const byConcept = new Map<string, T[]>();
+  for (const q of list) {
+    const arr = byConcept.get(q.conceptTitle) ?? [];
+    arr.push(q);
+    byConcept.set(q.conceptTitle, arr);
+  }
+  const out: T[] = [];
+  let last: string | null = null;
+  while (out.length < list.length) {
+    let best: string | null = null;
+    for (const [concept, arr] of byConcept) {
+      if (arr.length === 0 || concept === last) continue;
+      if (!best || arr.length > (byConcept.get(best)?.length ?? 0)) best = concept;
+    }
+    if (!best) {
+      // Only the last concept has questions left — take them in order.
+      for (const arr of byConcept.values()) out.push(...arr);
+      break;
+    }
+    out.push(byConcept.get(best)!.shift()!);
+    last = best;
+  }
+  return out;
+}
+
+/**
  * Spaced-repetition Review queue (Quizlet pattern).
  *
  * Lists the user's own weak concepts that are due today, across all
@@ -61,6 +96,9 @@ export default function ReviewQueue({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  /** Express mode: 15-minute rapid-fire review, weakest concepts first. */
+  const [express, setExpress] = useState(false);
+  const [expressLeftMs, setExpressLeftMs] = useState(15 * 60 * 1000);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,7 +154,7 @@ export default function ReviewQueue({
     onActivity?.(correct);
   }
 
-  async function startReview() {
+  async function startReview(isExpress = false) {
     if (due.length === 0 || generating) return;
     setError(null);
     setGenerating(true);
@@ -125,14 +163,21 @@ export default function ReviewQueue({
     setSessionCorrect(0);
     setCurrent(0);
     setPicked(null);
+    setExpress(isExpress);
+    setExpressLeftMs(15 * 60 * 1000);
     try {
+      // Express mode: weakest concepts first (most misses), retrieval
+      // only, against a 15-minute clock. Normal mode: most overdue first.
+      const picked = isExpress
+        ? [...due].sort((a, b) => b.record.misses - a.record.misses).slice(0, 3)
+        : due.slice(0, 3);
       const res = await fetch("/api/personalized-practice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           guideTitle: "Review queue",
           educationLevel: educationLevel ?? "",
-          weakConcepts: due.slice(0, 3).map((d) => ({
+          weakConcepts: picked.map((d) => ({
             conceptTitle: d.record.conceptTitle,
             moduleTitle: d.record.moduleTitle,
             misses: d.record.misses,
@@ -150,13 +195,33 @@ export default function ReviewQueue({
       if (!Array.isArray(list) || list.length === 0) {
         throw new Error("No review questions came back — try again.");
       }
-      setQuestions(list);
+      // Interleaving (Rohrer et al.): shuffle so no two consecutive
+      // questions test the same concept — the student must choose the
+      // right idea from the question itself, not from the previous one.
+      setQuestions(interleaveQuestions(list));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setGenerating(false);
     }
   }
+
+  // Express countdown: when the 15 minutes run out, the session ends.
+  useEffect(() => {
+    if (!express || !questions || sessionDone) return;
+    const id = window.setInterval(() => {
+      setExpressLeftMs((ms) => {
+        if (ms <= 1000) {
+          window.clearInterval(id);
+          setSessionDone(true);
+          setRefreshKey((k) => k + 1);
+          return 0;
+        }
+        return ms - 1000;
+      });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [express, questions, sessionDone]);
 
   function answerCurrent(opt: string) {
     if (!questions || picked) return;
@@ -291,27 +356,40 @@ export default function ReviewQueue({
               <span className="chip">Review</span>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={startReview}
-            disabled={generating}
-            className="btn-primary w-full justify-center sm:w-auto"
-          >
-            {generating ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Building your
-                review…
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4" /> Start review ({due.length}{" "}
-                due)
-              </>
-            )}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => startReview(false)}
+              disabled={generating}
+              className="btn-primary justify-center"
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Building your
+                  review…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" /> Start review ({due.length}{" "}
+                  due)
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => startReview(true)}
+              disabled={generating}
+              className="btn-secondary justify-center"
+              title="15 minutes, weakest concepts first, retrieval only — the fastest way to lock in what you keep missing."
+            >
+              <Clock className="h-4 w-4" /> 15-minute express
+            </button>
+          </div>
           {error && <p className="feedback-wrong font-medium">{error}</p>}
           <p className="text-xs font-medium text-ink-400">
-            Tip: press 1–4 to answer, Enter to continue.
+            Mixed review: questions shuffle across concepts, so you have to
+            pick the right idea from each question — not from the one before
+            it. Tip: press 1–4 to answer, Enter to continue.
           </p>
         </div>
       )}
@@ -322,8 +400,18 @@ export default function ReviewQueue({
             <span className="chip">
               Question {current + 1} of {questions.length} · {q.conceptTitle}
             </span>
-            <span className="text-xs font-semibold text-ink-400">
-              {sessionCorrect} correct so far
+            <span className="flex items-center gap-2">
+              {express && (
+                <span className="chip-amber tabular-nums">
+                  <Clock className="h-3.5 w-3.5" />{" "}
+                  {Math.floor(expressLeftMs / 60000)}:
+                  {String(Math.floor((expressLeftMs % 60000) / 1000)).padStart(2, "0")}{" "}
+                  left
+                </span>
+              )}
+              <span className="text-xs font-semibold text-ink-400">
+                {sessionCorrect} correct so far
+              </span>
             </span>
           </div>
           <div className="progress-track mt-3">
@@ -392,7 +480,8 @@ export default function ReviewQueue({
         <div className="mt-5 rounded-2xl border border-ink-100 bg-white p-5 text-center shadow-sm">
           <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
           <h3 className="mt-2 text-lg font-extrabold tracking-tight">
-            Review done — {sessionCorrect} of {questions.length} correct
+            {express ? "Express done" : "Review done"} — {sessionCorrect} of{" "}
+            {questions.length} correct
           </h3>
           <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-ink-500">
             Concepts you got right move further out (3, 7, then 16 days).
@@ -403,6 +492,7 @@ export default function ReviewQueue({
             onClick={() => {
               setQuestions(null);
               setSessionDone(false);
+              setExpress(false);
               setRefreshKey((k) => k + 1);
             }}
             className="btn-primary mx-auto mt-4"

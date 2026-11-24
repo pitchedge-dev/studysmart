@@ -43,7 +43,7 @@ export type GuideErrorRecord = {
 export const MASTERY_STREAK = 2;
 
 export type ErrorAnswerInput = {
-  source: "quiz" | "practice" | "checkpoint" | "personalized" | "reasoning";
+  source: "quiz" | "practice" | "checkpoint" | "personalized" | "reasoning" | "teachback";
   moduleTitle: string;
   conceptTitle: string;
   question: string;

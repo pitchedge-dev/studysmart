@@ -59,6 +59,8 @@ import ThemePicker from "@/components/ThemePicker";
 import StreakWidget from "@/components/StreakWidget";
 import CommandPalette, { type PaletteAction } from "@/components/CommandPalette";
 import ReviewQueue from "@/components/ReviewQueue";
+import FocusTimer from "@/components/FocusTimer";
+import TeachBack, { type TeachBackResult } from "@/components/TeachBack";
 import Confetti from "@/components/Confetti";
 import { MasteryBadge, MasterySummary } from "@/components/MasteryBadge";
 import StudyPlan from "@/components/StudyPlan";
@@ -74,6 +76,7 @@ import YourGuides from "@/components/YourGuides";
 import Browse from "@/components/Browse";
 import Friends, { type FriendEntry } from "@/components/Friends";
 import {
+  getGuideById,
   getMyProfile,
   getProfilesByIds,
   getSupabase,
@@ -261,6 +264,32 @@ export default function Home() {
     };
   }, [user, section]);
 
+  // "Continue where you left off" must never point at a guide this
+  // session cannot open. The entry lives in localStorage, so it can
+  // outlive its guide: the guide may have been deleted, or it may be
+  // private to another account while this browser is signed out (the
+  // "Guide not found" dead end). Validate the saved entry whenever it
+  // changes and whenever the sign-in changes; clear it when the guide
+  // is unreadable. An entry with no guide id is an unsaved in-session
+  // guide, which is gone after a reload — clear that too.
+  const lastGuideId = activity.state.lastGuide?.guideId ?? null;
+  useEffect(() => {
+    const entry = activity.state.lastGuide;
+    if (!entry) return;
+    if (!entry.guideId) {
+      activity.clearLastGuide();
+      return;
+    }
+    let cancelled = false;
+    getGuideById(entry.guideId).then((found) => {
+      if (!cancelled && !found) activity.clearLastGuide();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastGuideId, user?.id]);
+
   // `g` then a letter jumps to a section (Linear-style, reliable only
   // because every target is a real section). Never fires while typing.
   const gPendingRef = useRef(false);
@@ -352,6 +381,45 @@ export default function Home() {
     setTutorContext(undefined);
     setTutorPrefill({ message, key: Date.now() });
     setTutorOpen(true);
+  }
+
+  /**
+   * "Teach it back" grading → error tracking. A strong explanation
+   * (8+/10) counts as a correct answer for the concept; a weak one
+   * (4 or less) counts as a miss, so the concept comes back in the
+   * Review queue. Middle scores (5–7) leave tracking untouched.
+   */
+  function handleTeachBack(
+    moduleTitle: string,
+    conceptTitle: string,
+    result: TeachBackResult
+  ) {
+    if (result.score >= 8) {
+      recordAnswer({
+        source: "teachback",
+        moduleTitle,
+        conceptTitle,
+        question: `Teach it back: ${conceptTitle}`,
+        picked: "Explained from memory",
+        correctAnswer: "Complete, accurate explanation",
+        explanation: result.feedback,
+        correct: true,
+      });
+    } else if (result.score <= 4) {
+      recordAnswer({
+        source: "teachback",
+        moduleTitle,
+        conceptTitle,
+        question: `Teach it back: ${conceptTitle}`,
+        picked: "Explanation had gaps",
+        correctAnswer: "Complete, accurate explanation",
+        explanation:
+          result.missingPoints[0] ??
+          result.misconceptions[0] ??
+          result.feedback,
+        correct: false,
+      });
+    }
   }
 
   /** Post-game "Review your misses": Battle Arena misses become weak
@@ -1221,6 +1289,12 @@ export default function Home() {
               </ul>
             </div>
           )}
+          <FocusTimer
+            onFocusComplete={() => {
+              activity.recordFocusSession();
+              setCelebration("Focus session done — +25 XP");
+            }}
+          />
         </div>
       )}
 
@@ -1785,6 +1859,21 @@ export default function Home() {
                               definition={concept.formulaOrDefinition}
                               onExplain={explainConcept}
                             />
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <TeachBack
+                                conceptTitle={concept.title}
+                                definition={concept.formulaOrDefinition}
+                                explanation={concept.explanation}
+                                educationLevel={educationLevel}
+                                onAnswer={(_strong, result) =>
+                                  handleTeachBack(
+                                    mod.title,
+                                    concept.title,
+                                    result
+                                  )
+                                }
+                              />
+                            </div>
                             {(concept.pronunciation || isVocabulary) && (
                               <Pronunciation
                                 term={concept.title}

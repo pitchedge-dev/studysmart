@@ -24,6 +24,7 @@ import { recordActivityNow } from "@/lib/activity";
 import { MasteryBadge, MasterySummary } from "./MasteryBadge";
 import StudyPlan from "./StudyPlan";
 import ExplainButtons from "./ExplainButtons";
+import TeachBack, { type TeachBackResult } from "./TeachBack";
 import Confetti from "./Confetti";
 import Pronunciation from "./Pronunciation";
 import ShowYourReasoning from "./ShowYourReasoning";
@@ -180,6 +181,46 @@ export default function GuideView({
     setTutorContext(undefined);
     setTutorPrefill({ message, key: Date.now() });
     setTutorOpen(true);
+  }
+
+  /**
+   * "Teach it back" grading → error tracking. A strong explanation
+   * (8+/10) counts as a correct answer for the concept; a weak one
+   * (4 or less) counts as a miss, so the concept comes back in the
+   * Review queue. Middle scores (5–7) are partial understanding — the
+   * feedback stands on its own and tracking is left untouched.
+   */
+  function handleTeachBack(
+    moduleTitle: string,
+    conceptTitle: string,
+    result: TeachBackResult
+  ) {
+    if (result.score >= 8) {
+      recordAnswer({
+        source: "teachback",
+        moduleTitle,
+        conceptTitle,
+        question: `Teach it back: ${conceptTitle}`,
+        picked: "Explained from memory",
+        correctAnswer: "Complete, accurate explanation",
+        explanation: result.feedback,
+        correct: true,
+      });
+    } else if (result.score <= 4) {
+      recordAnswer({
+        source: "teachback",
+        moduleTitle,
+        conceptTitle,
+        question: `Teach it back: ${conceptTitle}`,
+        picked: "Explanation had gaps",
+        correctAnswer: "Complete, accurate explanation",
+        explanation:
+          result.missingPoints[0] ??
+          result.misconceptions[0] ??
+          result.feedback,
+        correct: false,
+      });
+    }
   }
 
   // Reading-time estimate from the real word count (200 wpm).
@@ -657,6 +698,17 @@ export default function GuideView({
                         definition={concept.formulaOrDefinition}
                         onExplain={explainConcept}
                       />
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <TeachBack
+                          conceptTitle={concept.title}
+                          definition={concept.formulaOrDefinition}
+                          explanation={concept.explanation}
+                          educationLevel={meta?.educationLevel ?? ""}
+                          onAnswer={(_strong, result) =>
+                            handleTeachBack(mod.title, concept.title, result)
+                          }
+                        />
+                      </div>
                       {(concept.pronunciation || isVocabulary) && (
                         <Pronunciation
                           term={concept.title}

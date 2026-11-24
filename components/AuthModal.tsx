@@ -16,6 +16,28 @@ function isValidUsername(value: string): boolean {
   return /^[a-zA-Z0-9_]{3,20}$/.test(value);
 }
 
+/**
+ * Supabase auth errors are terse and technical ("Invalid login
+ * credentials"). Translate the common ones into plain language — the
+ * raw message never tells the student what to do next.
+ */
+function friendlyAuthError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("invalid login credentials"))
+    return "That email and password don't match an account. Check for typos, or create a new account below.";
+  if (m.includes("email not confirmed"))
+    return "That email address hasn't been confirmed yet. Check your inbox for the confirmation email.";
+  if (m.includes("user already registered") || m.includes("already exists"))
+    return "An account with that email already exists — sign in instead.";
+  if (m.includes("password") && m.includes("6 characters"))
+    return "Passwords need at least 6 characters.";
+  if (m.includes("too many requests") || m.includes("rate limit"))
+    return "Too many tries — wait a minute and try again.";
+  if (m.includes("network") || m.includes("fetch"))
+    return "Could not reach the sign-in service. Check your connection and try again.";
+  return message;
+}
+
 export default function AuthModal({
   open,
   onClose,
