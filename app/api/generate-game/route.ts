@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-  getLiteModels,
-  getModels,
+  getModelsFor,
   isOverloadedError,
+  isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
   safeErrorDetail,
@@ -147,9 +147,10 @@ export async function POST(req: NextRequest) {
         ? `The supplied material was classified as: ${topicType.trim()}. `
         : "";
 
-    // ---- Step 1: fast template previews (lightest models first) ----
+    // ---- Step 1: fast template previews (games category: Groq first,
+    // fastest) ----
     if (step === "templates") {
-      const models = getLiteModels();
+      const models = getModelsFor("games");
       if (models.length === 0) {
         return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
       }
@@ -171,7 +172,7 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           lastErr = err;
           console.error("[/api/generate-game templates] attempt failed:", err);
-          if (!isOverloadedError(err)) break;
+          if (!isRetryableProviderError(err)) break;
         }
       }
 
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ---- Step 2: full game (from a chosen template, or the old direct way) ----
-    const models = getModels();
+    const models = getModelsFor("games");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
@@ -243,7 +244,7 @@ export async function POST(req: NextRequest) {
         } catch (err) {
           batchErr = err;
           console.error("[/api/generate-game batch] attempt failed:", err);
-          if (!isOverloadedError(err)) break;
+          if (!isRetryableProviderError(err)) break;
         }
       }
       throw batchErr;

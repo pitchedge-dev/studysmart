@@ -3,8 +3,9 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import {
   getLiteModels,
-  getModels,
+  getModelsFor,
   isOverloadedError,
+  isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
   safeErrorDetail,
@@ -425,7 +426,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const models = getModels();
+    // Long structured guides route to the guide category: Gemini first
+    // (proven structured output here), then Groq, then OpenRouter.
+    const models = getModelsFor("guides");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
@@ -470,8 +473,10 @@ export async function POST(req: NextRequest) {
     // Walk the model fallback chain. Each model is tried at most once per
     // shape — retrying the same overloaded model just burns its free quota.
     // Each attempt is capped at 25s (the free-tier models can stall under
-    // load) and the whole loop at 3 attempts, so the request stays inside
-    // the 60s function timeout. A real guide in the simpler shape beats a 500.
+    // load) and the whole loop at one attempt per model in the
+    // cross-provider chain, bounded by a 45s wall clock, so the request
+    // stays inside the 60s function timeout. A real guide in the simpler
+    // shape beats a 500.
     //
     // Generation runs in two batches behind one loading state:
     //  1. Core pass — the deep modules, concepts, practice, and quiz.
@@ -485,7 +490,8 @@ export async function POST(req: NextRequest) {
     let attempts = 0;
     let core: z.infer<typeof GenerateResultSchema> | null = null;
     for (const model of models) {
-      if (attempts >= 3) break;
+      if (attempts >= models.length || Date.now() - startedAt >= 45000)
+        break;
       try {
         attempts += 1;
         const { object } = await generateObject({
@@ -502,8 +508,9 @@ export async function POST(req: NextRequest) {
       } catch (fullErr) {
         lastErr = fullErr;
         logError("[/api/generate] full-shape attempt failed:", fullErr);
-        if (isOverloadedError(fullErr)) continue;
-        if (attempts >= 3) break;
+        if (isRetryableProviderError(fullErr)) continue;
+        if (attempts >= models.length || Date.now() - startedAt >= 45000)
+          break;
         try {
           attempts += 1;
           const { object } = await generateObject({

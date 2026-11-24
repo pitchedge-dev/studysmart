@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-  getModels,
+  getModelsFor,
   isOverloadedError,
+  isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
   safeErrorDetail,
@@ -53,8 +54,8 @@ const CheckReasoningSchema = z.object({
  * POST /api/check-reasoning
  *
  * The student writes their reasoning by hand (stylus on iPad, finger or
- * mouse elsewhere) and the AI reads the handwriting image with Gemini
- * vision and grades it. The check scores TWO things: the WORK — is the
+ * mouse elsewhere) and the AI reads the handwriting image with vision
+ * (Gemini first, then Groq and OpenRouter as fallback) and grades it. The check scores TWO things: the WORK — is the
  * final answer right? — and the PROCESS — are the steps logical, in the
  * right order, complete, with the working shown? The result is a score
  * out of 10, pros, cons, and a hint. Unreadable handwriting is reported
@@ -95,7 +96,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const models = getModels();
+    // Vision-capable models only: text-only fallback models cannot read
+    // the handwriting image, so they are not in this list. Routes to the
+    // reasoning category: Gemini vision first, then Groq, then OpenRouter.
+    const models = getModelsFor("reasoning");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
@@ -152,7 +156,7 @@ List pros (what was done well: correct steps, good method, clear working) and co
       } catch (err) {
         lastErr = err;
         console.error("[/api/check-reasoning] attempt failed:", err);
-        if (isOverloadedError(err)) continue;
+        if (isRetryableProviderError(err)) continue;
         break;
       }
     }

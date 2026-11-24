@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-  getLiteModels,
+  getModelsFor,
   isOverloadedError,
+  isRetryableProviderError,
   safeErrorDetail,
 } from "@/lib/gemini";
 
@@ -140,7 +141,9 @@ async function searchWithDataApi(
  *  video IDs, then verify every single one with oEmbed. Anything unverified
  *  is dropped — a hallucinated ID can never reach the page. */
 async function suggestAndVerify(topic: string): Promise<VerifiedVideo[]> {
-  const models = getLiteModels();
+  // Video suggestions route to the videos category: Gemini first
+  // (broadest knowledge of real videos), then Groq, then OpenRouter.
+  const models = getModelsFor("videos");
   if (models.length === 0) return [];
   let lastErr: unknown = null;
   for (const model of models) {
@@ -166,7 +169,7 @@ async function suggestAndVerify(topic: string): Promise<VerifiedVideo[]> {
     } catch (err) {
       lastErr = err;
       console.error("[/api/videos suggest] attempt failed:", err);
-      if (!isOverloadedError(err)) break;
+      if (!isRetryableProviderError(err)) break;
     }
   }
   if (lastErr) {

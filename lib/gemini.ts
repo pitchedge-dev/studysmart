@@ -1,100 +1,36 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-
 /**
- * Gemini model fallback chain.
+ * Backwards-compatible re-export shim.
  *
- * History: gemini-1.5-flash was retired by Google, and gemini-2.5-flash is
- * no longer available to new users — the live API itself (Nov 2026) directs
- * callers to gemini-3.8-flash. The 3.8-flash free tier is very tight
- * (reported ~5 requests/minute, ~20 requests/day), so on 503 / overloaded /
- * quota errors we fall back to the Lite models, which have a much larger
- * free allowance (reported ~500 requests/day). Never retry the same model
- * more than once — a retry on the same overloaded model just burns quota.
+ * The model fallback logic moved to lib/providers.ts, which now routes
+ * EACH generation category to the provider best for that job first
+ * (Gemini, Groq, OpenRouter — 3 providers per category). Every existing
+ * import from "@/lib/gemini" keeps working unchanged — getModels(),
+ * getLiteModels(), isOverloadedError(), OVERLOADED_MESSAGE,
+ * MISSING_KEY_MESSAGE and safeErrorDetail all come from the provider
+ * module. New code should import from "@/lib/providers" directly and use
+ * getModelsFor(category).
  */
-export const GEMINI_MODEL_ID = "gemini-3.8-flash";
-
-export const GEMINI_MODEL_FALLBACKS = [
-  "gemini-3.8-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3.6-flash",
-  "gemini-3.1-flash-lite",
-] as const;
-
-/**
- * Lite-first order for the fast Battle Arena template step: the lightest
- * models answer in a few seconds and have the largest free allowance, so
- * template previews start there and only fall back to the full chain if
- * both Lite models are overloaded.
- */
-export const GEMINI_LITE_MODEL_FALLBACKS = [
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-  "gemini-3.8-flash",
-  "gemini-3.6-flash",
-] as const;
-
-function createProvider() {
-  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-  if (!apiKey) return null;
-  return createGoogleGenerativeAI({ apiKey });
-}
-
-/** The primary Gemini model, wired to the env key. Returns null when no key is set. */
-export function getModel() {
-  const google = createProvider();
-  if (!google) return null;
-  return google(GEMINI_MODEL_ID);
-}
-
-/** All models in the fallback chain, in priority order. Empty when no key is set. */
-export function getModels() {
-  const google = createProvider();
-  if (!google) return [];
-  return GEMINI_MODEL_FALLBACKS.map((id) => google(id));
-}
-
-/** Lite models first, then the rest of the chain — for the fast template
- *  preview step, which must return in a few seconds. Empty when no key is set. */
-export function getLiteModels() {
-  const google = createProvider();
-  if (!google) return [];
-  return GEMINI_LITE_MODEL_FALLBACKS.map((id) => google(id));
-}
-
-/** True when an error means the model is overloaded / rate-limited / out of
- *  free quota — the cases where trying the next model in the chain helps. */
-export function isOverloadedError(err: unknown): boolean {
-  const text = (
-    err instanceof Error
-      ? `${err.name} ${err.message} ${JSON.stringify((err as { cause?: unknown }).cause ?? "")}`
-      : String(err)
-  ).toLowerCase();
-  return (
-    text.includes("503") ||
-    text.includes("429") ||
-    text.includes("overloaded") ||
-    text.includes("quota") ||
-    text.includes("rate limit") ||
-    text.includes("rate_limit") ||
-    text.includes("resource exhausted") ||
-    text.includes("high demand") ||
-    text.includes("too many requests") ||
-    text.includes("unavailable") ||
-    text.includes("abort") ||
-    text.includes("timed out") ||
-    text.includes("timeout")
-  );
-}
-
-export const MISSING_KEY_MESSAGE =
-  "GOOGLE_GENERATIVE_AI_API_KEY is not configured. Add your free Google AI Studio key to the environment to generate content.";
-
-export const OVERLOADED_MESSAGE =
-  "Gemini is busy / daily free limit reached — try again later";
-
-/** Safe one-line error detail for API responses: the provider's message,
- *  truncated, with anything resembling an API key stripped out. */
-export function safeErrorDetail(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.replace(/AIza[0-9A-Za-z_-]{10,}/g, "[key]").slice(0, 300);
-}
+export {
+  GEMINI_MODEL_ID,
+  GEMINI_MODEL_FALLBACKS,
+  GEMINI_LITE_MODEL_FALLBACKS,
+  GROQ_MODEL_FALLBACKS,
+  GROQ_LITE_MODEL,
+  GROQ_VISION_MODEL,
+  OPENROUTER_MODEL,
+  OPENROUTER_REASONING_MODEL,
+  OPENROUTER_VISION_MODEL,
+  CATEGORY_SPECS,
+  CATEGORY_ROUTING,
+  getModel,
+  getModels,
+  getModelsFor,
+  getLiteModels,
+  getVisionModels,
+  isOverloadedError,
+  isRetryableProviderError,
+  MISSING_KEY_MESSAGE,
+  OVERLOADED_MESSAGE,
+  safeErrorDetail,
+} from "./providers";
+export type { GenerationCategory } from "./providers";

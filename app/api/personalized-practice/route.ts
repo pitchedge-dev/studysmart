@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-  getModels,
+  getModelsFor,
   isOverloadedError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
@@ -74,11 +74,9 @@ export async function POST(req: NextRequest) {
     }
     const weak = parsed.data;
 
-    // NOTE: uses getModels() (the model API on main today) rather than
-    // the per-category getModelsFor("practice") — the provider layer that
-    // adds getModelsFor has not landed on main yet. Switching to
-    // getModelsFor("practice") is a one-line change once it has.
-    const models = getModels();
+    // Practice routes to the practice category: Gemini first (most
+    // reliable structured output), then Groq (strict JSON), then OpenRouter.
+    const models = getModelsFor("practice");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }

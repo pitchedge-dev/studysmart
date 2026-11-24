@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
 import {
-  getModels,
+  getModelsFor,
   isOverloadedError,
+  isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
   safeErrorDetail,
@@ -29,7 +30,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const models = getModels();
+    // Chat routes to the chat category: Groq first (fastest replies),
+    // then Gemini Lite, then OpenRouter.
+    const models = getModelsFor("chat");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
@@ -65,7 +68,7 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         lastErr = err;
         console.error("[/api/chat] attempt failed:", err);
-        if (!isOverloadedError(err)) break;
+        if (!isRetryableProviderError(err)) break;
       }
     }
 
