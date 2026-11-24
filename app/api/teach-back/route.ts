@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
-  getModelsFor,
+  getModels,
   isOverloadedError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
@@ -76,7 +76,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const models = getModelsFor("practice");
+    // NOTE: uses getModels() (the model API on main today) rather than
+    // the per-category getModelsFor("practice") — the provider layer that
+    // adds getModelsFor has not landed on main yet. Switching to
+    // getModelsFor("practice") is a one-line change once it has.
+    const models = getModels();
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
     }
