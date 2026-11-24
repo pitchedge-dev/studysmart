@@ -20,6 +20,7 @@ import {
 } from "@/lib/supabase";
 import type { GameData } from "./BattleArena";
 import type { GenerateResult } from "@/app/page";
+import EmptyState from "./EmptyState";
 
 function formatDate(value: string): string {
   try {
@@ -46,6 +47,7 @@ export default function Browse({
   onOpenGuide,
   onOpenGuideDetail,
   onOpenGame,
+  onGenerate,
 }: {
   user: AppUser | null;
   /** The optional guideId keys this copy for per-user error tracking. */
@@ -53,6 +55,8 @@ export default function Browse({
   /** Open a published guide on its own dedicated page (/guide/[id]). */
   onOpenGuideDetail?: (id: string) => void;
   onOpenGame: (game: GameData, topic: string) => void;
+  /** Sends the user to Generate (empty-state button). */
+  onGenerate?: () => void;
 }) {
   const [items, setItems] = useState<StudyGuideRow[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -138,10 +142,15 @@ export default function Browse({
         </p>
       )}
       {!loading && items.length === 0 && (
-        <p className="mt-4 text-sm leading-relaxed text-ink-500">
-          Nothing published yet. Generate a guide or a game, save it to your
-          account, and publish it to be the first one here.
-        </p>
+        <div className="mt-4">
+          <EmptyState
+            icon={<Globe className="h-6 w-6" />}
+            headline="Nothing published yet"
+            outcome="Guides and games people choose to publish will appear here. Generate a guide or a game, save it to your account, and publish it to be the first one here."
+            buttonLabel="Generate a study guide"
+            onAction={() => onGenerate?.()}
+          />
+        </div>
       )}
       <div className="mt-4 space-y-3">
         {items.map((row) => (

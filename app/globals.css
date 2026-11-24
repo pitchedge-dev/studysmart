@@ -255,3 +255,153 @@ body {
 .arena-pop {
   animation: arena-pop 0.3s ease-out;
 }
+
+/* ---------- Dark mode (first-class theme, indigo + amber kept) ----------
+   The `dark` class lives on <html> (see lib/theme.ts). Shared component
+   classes get dark surfaces here; the most-used Tailwind ink/white
+   utilities are remapped so the existing light design needs no rewrite.
+   Light mode is untouched. */
+.dark body {
+  background-color: #131022;
+  background-image:
+    radial-gradient(60rem 30rem at 85% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(50rem 26rem at -10% 0%, rgba(245, 158, 11, 0.10), transparent 55%);
+  color: #eceaf6;
+}
+.dark .card {
+  background-color: #221f3d;
+  border-color: #3b3852;
+}
+.dark .input {
+  background-color: #1c1933;
+  border-color: #3b3852;
+  color: #eceaf6;
+}
+.dark .input::placeholder {
+  color: #8f88b5;
+}
+.dark .chip {
+  background-color: #312e81;
+  color: #c7d2fe;
+}
+.dark .chip-amber {
+  background-color: #451a03;
+  color: #fde68a;
+}
+.dark .option-btn {
+  background-color: #221f3d;
+  border-color: #3b3852;
+  color: #eceaf6;
+}
+.dark .option-correct {
+  background-color: #064e3b;
+  border-color: #10b981;
+  color: #d1fae5;
+}
+.dark .option-wrong {
+  background-color: #4c0519;
+  border-color: #f43f5e;
+  color: #ffe4e6;
+}
+.dark .option-dimmed {
+  background-color: #1c1933;
+  border-color: #2e2a4d;
+  color: #6b688f;
+}
+.dark .feedback-neutral {
+  background-color: #221f3d;
+  color: #d9d6ec;
+}
+.dark .feedback-correct {
+  background-color: #064e3b;
+  color: #d1fae5;
+}
+.dark .feedback-wrong {
+  background-color: #4c0519;
+  color: #ffe4e6;
+}
+.dark .progress-track {
+  background-color: #2e2a4d;
+}
+.dark .btn-secondary {
+  background-color: #221f3d;
+  border-color: #3b3852;
+  color: #eceaf6;
+}
+.dark .btn-ghost {
+  color: #b9b3d6;
+}
+.dark .markdown {
+  color: #d9d6ec;
+}
+.dark .markdown h1,
+.dark .markdown h2,
+.dark .markdown h3,
+.dark .markdown strong {
+  color: #f6f6fb;
+}
+.dark .markdown code {
+  background-color: #312e81;
+  color: #c7d2fe;
+}
+.dark .markdown blockquote {
+  background-color: #451a03;
+  color: #fde68a;
+}
+.dark .markdown th {
+  background-color: #312e81;
+  color: #f6f6fb;
+}
+.dark .markdown th,
+.dark .markdown td {
+  border-color: #3b3852;
+}
+.dark .hero-glow {
+  background:
+    radial-gradient(36rem 18rem at 50% -4rem, rgba(99, 102, 241, 0.28), transparent 65%),
+    radial-gradient(24rem 12rem at 88% 0%, rgba(245, 158, 11, 0.20), transparent 60%);
+}
+/* Remap the ink text scale + white surfaces so existing markup reads in dark. */
+.dark .text-ink-900 { color: #f6f6fb; }
+.dark .text-ink-800 { color: #eceaf6; }
+.dark .text-ink-700 { color: #d9d6ec; }
+.dark .text-ink-600 { color: #b9b3d6; }
+.dark .text-ink-500 { color: #b9b3d6; }
+.dark .text-ink-400 { color: #8f88b5; }
+.dark .bg-white { background-color: #221f3d; }
+.dark .bg-ink-100 { background-color: #2e2a4d; }
+.dark .bg-ink-50 { background-color: #1c1933; }
+.dark .border-ink-100 { border-color: #3b3852; }
+.dark .border-ink-200 { border-color: #514d73; }
+.dark .bg-brand-50 { background-color: #312e81; }
+.dark .bg-accent-50 { background-color: #451a03; }
+.dark ::-webkit-scrollbar-thumb {
+  background: #3b3852;
+  border-color: #1c1933;
+}
+
+/* ---------- Focus reading mode (Readwise pattern) ---------- */
+.focus-mode .focus-measure {
+  max-width: 65ch;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 1.125rem;
+  line-height: 1.85;
+}
+.focus-mode .focus-measure .markdown {
+  font-size: 1.125rem;
+  line-height: 1.85;
+}
+.focus-mode mark,
+.focus-mode .focus-highlight {
+  background: #fbda83;
+  color: #451a03;
+  border-radius: 0.25rem;
+  padding: 0 0.2em;
+}
+.dark .focus-mode mark,
+.dark .focus-mode .focus-highlight {
+  background: #b45309;
+  color: #fef3c7;
+}
+

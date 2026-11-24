@@ -19,7 +19,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Apply the saved theme before first paint — no light flash.
+            Same key as lib/theme.ts (studysmart-theme). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(window.localStorage.getItem("studysmart-theme")==="dark"){document.documentElement.classList.add("dark")}}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="min-h-screen font-sans text-ink-900 antialiased">
         {children}
         <Analytics />

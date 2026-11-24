@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Focus,
   GraduationCap,
   Lightbulb,
   ListTree,
@@ -18,7 +19,12 @@ import {
 } from "lucide-react";
 import TargetedPractice, { type StudyModule } from "./TargetedPractice";
 import PersonalizedPractice from "./PersonalizedPractice";
-import { useGuideErrors } from "@/lib/errorTracking";
+import { applyAnswer, MASTERY_STREAK, useGuideErrors, type ErrorAnswerInput } from "@/lib/errorTracking";
+import { recordActivityNow } from "@/lib/activity";
+import { MasteryBadge, MasterySummary } from "./MasteryBadge";
+import StudyPlan from "./StudyPlan";
+import ExplainButtons from "./ExplainButtons";
+import Confetti from "./Confetti";
 import Pronunciation from "./Pronunciation";
 import ShowYourReasoning from "./ShowYourReasoning";
 import SectionCheckpoint from "./SectionCheckpoint";
@@ -107,11 +113,94 @@ export default function GuideView({
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorContext, setTutorContext] = useState<string | undefined>(undefined);
   const [tutorTitle, setTutorTitle] = useState<string | undefined>(undefined);
+  const [tutorPrefill, setTutorPrefill] = useState<{
+    message: string;
+    key: number;
+  } | null>(null);
+
+  // Focus reading mode (Readwise pattern): hides the sidebar, narrows
+  // the measure to ~65ch, larger type, warm key-term highlights.
+  const [focusMode, setFocusMode] = useState(false);
+  // Celebration message when a concept (or the whole guide) is mastered.
+  const [celebration, setCelebration] = useState<string | null>(null);
 
   // Per-user error tracking for this guide copy — wrong answers become
   // weak spots, correct ones count toward mastering them. Private to the
   // signed-in user; never shared with a published or shared copy.
   const guideErrors = useGuideErrors(guideKey, userId);
+
+  /** Record an answer: error tracking + XP/streak, and celebrate when a
+   *  concept crosses into Mastered (2 correct in a row after a miss). */
+  function recordAnswer(answer: ErrorAnswerInput) {
+    const title = answer.conceptTitle.trim() || "Practice Quiz";
+    const before = guideErrors.records.find((r) => r.conceptTitle === title);
+    const after = applyAnswer(guideErrors.records, answer).find(
+      (r) => r.conceptTitle === title
+    );
+    guideErrors.record(answer);
+    recordActivityNow("question", { correct: answer.correct, userId });
+    if (
+      after &&
+      after.misses > 0 &&
+      after.correctStreak >= MASTERY_STREAK &&
+      (!before || before.correctStreak < MASTERY_STREAK)
+    ) {
+      recordActivityNow("mastery", { userId });
+      setCelebration(`Mastered: ${after.conceptTitle}`);
+    }
+  }
+
+  // Celebrate once per session when every missed concept in this guide
+  // is mastered.
+  useEffect(() => {
+    const withMisses = guideErrors.records.filter((r) => r.misses > 0);
+    if (withMisses.length === 0) return;
+    if (!withMisses.every((r) => r.correctStreak >= MASTERY_STREAK)) return;
+    const key = `studysmart-mastered-guide:${guideKey ?? "local"}`;
+    try {
+      if (window.sessionStorage.getItem(key)) return;
+      window.sessionStorage.setItem(key, "1");
+    } catch {
+      return;
+    }
+    setCelebration("Guide fully mastered");
+  }, [guideErrors.records, guideKey]);
+
+  /** "Explain simpler / deeper" — asks the tutor about one concept. */
+  function explainConcept(
+    level: "simpler" | "deeper",
+    conceptTitle: string,
+    definition: string
+  ) {
+    const message =
+      level === "simpler"
+        ? `Explain the concept "${conceptTitle}" in simpler terms, as if to a younger student. The definition given is: "${definition}". Use a short everyday analogy, then check I understood with one quick question.`
+        : `Go deeper on the concept "${conceptTitle}". The definition given is: "${definition}". Explain the underlying idea in more depth, with a harder example and one thing that often confuses people about it.`;
+    setTutorTitle(level === "simpler" ? "Explain it simpler" : "Go deeper");
+    setTutorContext(undefined);
+    setTutorPrefill({ message, key: Date.now() });
+    setTutorOpen(true);
+  }
+
+  // Reading-time estimate from the real word count (200 wpm).
+  const wordCount = useMemo(() => {
+    const text = [
+      result.studyGuide,
+      result.summary ?? "",
+      result.cheatSheet ?? "",
+      ...modules.flatMap((m) => [
+        m.title,
+        m.intro ?? "",
+        ...(m.coreIdeas ?? []),
+        ...m.concepts.map(
+          (c) =>
+            `${c.title} ${c.formulaOrDefinition} ${c.example} ${c.explanation ?? ""}`
+        ),
+      ]),
+    ].join(" ");
+    return text.split(/\s+/).filter(Boolean).length;
+  }, [result, modules]);
+  const readingMinutes = Math.max(1, Math.round(wordCount / 200));
 
   const totalPracticeProblems = modules.reduce(
     (n, m) => n + m.practice.reduce((a, g) => a + g.problems.length, 0),
@@ -219,7 +308,7 @@ export default function GuideView({
     const q = quiz[qi];
     if (!q || answers[qi]) return;
     setAnswers((prev) => ({ ...prev, [qi]: opt }));
-    guideErrors.record({
+    recordAnswer({
       source: "quiz",
       moduleTitle: result.guideTitle ?? "Practice Quiz",
       conceptTitle: "Practice Quiz",
@@ -303,13 +392,21 @@ export default function GuideView({
         <p className="flex items-center gap-2 text-sm font-bold tracking-tight text-ink-900">
           <ListTree className="h-4 w-4 text-brand-600" /> On this page
         </p>
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-xs font-semibold text-ink-400">
-            <span>Reading progress</span>
-            <span>{Math.round(scrollProgress)}%</span>
-          </div>
-          <div className="progress-track mt-1.5">
-            <div className="progress-fill" style={{ width: `${scrollProgress}%` }} />
+        <div className="mt-3 flex items-center gap-3">
+          <span className="relative inline-flex h-12 w-12 shrink-0 items-center justify-center">
+            <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden>
+              <circle cx="24" cy="24" r="19" fill="none" strokeWidth="5" className="stroke-ink-100 dark:stroke-ink-700" />
+              <circle cx="24" cy="24" r="19" fill="none" stroke="#6366f1" strokeWidth="5" strokeLinecap="round" strokeDasharray={2 * Math.PI * 19} strokeDashoffset={2 * Math.PI * 19 * (1 - scrollProgress / 100)} transform="rotate(-90 24 24)" />
+            </svg>
+            <span className="absolute text-[10px] font-extrabold text-ink-900">
+              {Math.round(scrollProgress)}%
+            </span>
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-ink-500">Reading progress</p>
+            <p className="text-xs font-medium text-ink-400">
+              {readingMinutes} min read · {wordCount.toLocaleString()} words
+            </p>
           </div>
         </div>
         <ul className="mt-3 space-y-0.5">
@@ -354,7 +451,15 @@ export default function GuideView({
   );
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-24 sm:px-6">
+    <div className={`mx-auto max-w-6xl px-4 pb-24 sm:px-6${focusMode ? " focus-mode" : ""}`}>
+      {celebration && (
+        <>
+          <Confetti onDone={() => setCelebration(null)} />
+          <div className="fixed bottom-5 left-1/2 z-[75] -translate-x-1/2 rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lift">
+            🎉 {celebration}!
+          </div>
+        </>
+      )}
       {/* Reading progress bar */}
       <div className="fixed inset-x-0 top-0 z-50 h-1 bg-ink-100">
         <div
@@ -384,28 +489,50 @@ export default function GuideView({
               {meta?.createdAt && <span>· {formatDate(meta.createdAt)}</span>}
               {meta?.educationLevel && <span>· {meta.educationLevel}</span>}
               {meta?.testTiming && <span>· Test: {meta.testTiming}</span>}
+              <span>· {readingMinutes} min read</span>
             </p>
           </div>
-          <span className="chip-amber">
-            <GraduationCap className="h-3.5 w-3.5" /> Complete guide
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFocusMode((v) => !v)}
+              aria-pressed={focusMode}
+              className="btn-secondary px-3 py-1.5 text-sm"
+              title="Focus mode: hide the sidebar, narrow the text, larger type"
+            >
+              <Focus className="h-4 w-4 text-brand-600" />
+              {focusMode ? "Exit focus" : "Focus mode"}
+            </button>
+            <span className="chip-amber">
+              <GraduationCap className="h-3.5 w-3.5" /> Complete guide
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Mobile contents */}
-      <details className="card mt-6 p-4 lg:hidden">
-        <summary className="cursor-pointer text-sm font-bold text-ink-900">
-          Contents &amp; search
-        </summary>
-        <div className="mt-3">{sidebar}</div>
-      </details>
+      {/* Mastery summary + study plan, from this user's real answers and
+          the test date they gave. */}
+      <div className="mt-6 space-y-4">
+        <MasterySummary records={guideErrors.records} />
+        <StudyPlan testTiming={meta?.testTiming} modules={modules} />
+      </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="hidden lg:block">
+      {/* Mobile contents — hidden in focus mode */}
+      {!focusMode && (
+        <details className="card mt-6 p-4 lg:hidden">
+          <summary className="cursor-pointer text-sm font-bold text-ink-900">
+            Contents &amp; search
+          </summary>
+          <div className="mt-3">{sidebar}</div>
+        </details>
+      )}
+
+      <div className={focusMode ? "mt-6" : "mt-6 grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]"}>
+        <aside className={focusMode ? "hidden" : "hidden lg:block"}>
           <div className="sticky top-6 space-y-4">{sidebar}</div>
         </aside>
 
-        <div className="min-w-0 space-y-5">
+        <div className={focusMode ? "focus-measure min-w-0 space-y-5" : "min-w-0 space-y-5"}>
           {/* Overview */}
           <section id="overview" data-guide-section="overview" className="scroll-mt-6 space-y-5">
             {result.summary && (
@@ -473,8 +600,15 @@ export default function GuideView({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="chip">{concept.label}</span>
-                        <span className="text-xs font-semibold text-ink-400">
-                          Card {thisCard} of {totalCards}
+                        <span className="flex items-center gap-1.5">
+                          <MasteryBadge
+                            record={guideErrors.records.find(
+                              (r) => r.conceptTitle === concept.title
+                            )}
+                          />
+                          <span className="text-xs font-semibold text-ink-400">
+                            Card {thisCard} of {totalCards}
+                          </span>
                         </span>
                       </div>
                       <h3 className="mt-3 text-lg font-extrabold tracking-tight text-ink-900">
@@ -518,6 +652,11 @@ export default function GuideView({
                           {concept.memoryTip}
                         </p>
                       )}
+                      <ExplainButtons
+                        conceptTitle={concept.title}
+                        definition={concept.formulaOrDefinition}
+                        onExplain={explainConcept}
+                      />
                       {(concept.pronunciation || isVocabulary) && (
                         <Pronunciation
                           term={concept.title}
@@ -608,14 +747,17 @@ export default function GuideView({
                         example={mod.reasoningExample}
                         moduleTitle={mod.title}
                         conceptTitle={mod.concepts[0]?.title ?? mod.title}
-                        onAnswer={guideErrors.record}
+                        onAnswer={recordAnswer}
                       />
                     )}
                     {mod.checkpoint && (
                       <SectionCheckpoint
                         moduleTitle={mod.title}
                         questions={mod.checkpoint.questions}
-                        onAnswer={guideErrors.record}
+                        onAnswer={recordAnswer}
+                        onFinish={() =>
+                          recordActivityNow("section", { userId })
+                        }
                         onProgress={(answered, correct) =>
                           setCheckpointByModule((prev) => ({
                             ...prev,
@@ -708,7 +850,7 @@ export default function GuideView({
                 <SectionCheckpoint
                   moduleTitle="Final review"
                   questions={result.finalReview.questions}
-                  onAnswer={guideErrors.record}
+                  onAnswer={recordAnswer}
                   onProgress={(answered, correct) =>
                     setCheckpointByModule((prev) => ({
                       ...prev,
@@ -726,7 +868,7 @@ export default function GuideView({
               <TargetedPractice
                 modules={modules}
                 onAskTutor={openPracticeTutor}
-                onAnswer={guideErrors.record}
+                onAnswer={recordAnswer}
                 onProgress={(answered, correct) => setPracticeProgress({ answered, correct })}
               />
             </section>
@@ -741,7 +883,7 @@ export default function GuideView({
             weak={guideErrors.weak}
             mastered={guideErrors.mastered}
             signedIn={Boolean(userId)}
-            onAnswer={guideErrors.record}
+            onAnswer={recordAnswer}
             onClearErrors={guideErrors.clear}
           />
 
@@ -869,6 +1011,7 @@ export default function GuideView({
         studyGuide={result.studyGuide}
         context={tutorContext}
         title={tutorTitle}
+        prefill={tutorPrefill}
       />
     </div>
   );

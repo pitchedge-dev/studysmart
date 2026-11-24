@@ -20,8 +20,11 @@ import {
   Loader2,
   Menu,
   MessageSquareHeart,
+  Moon,
   Pencil,
+  RotateCcw,
   Sparkles,
+  Sun,
   Swords,
   Upload,
   User,
@@ -35,9 +38,25 @@ import BattleArena, { type GameData } from "@/components/BattleArena";
 import TargetedPractice, { type StudyModule } from "@/components/TargetedPractice";
 import PersonalizedPractice from "@/components/PersonalizedPractice";
 import {
+  applyAnswer,
+  loadErrors,
   localGuideKey,
+  MASTERY_STREAK,
+  saveErrors,
   useGuideErrors,
+  type ErrorAnswerInput,
 } from "@/lib/errorTracking";
+import { useActivity } from "@/lib/activity";
+import { dueCount as dueCountOf, loadAllErrors } from "@/lib/review";
+import { getTheme, toggleTheme } from "@/lib/theme";
+import StreakWidget from "@/components/StreakWidget";
+import CommandPalette, { type PaletteAction } from "@/components/CommandPalette";
+import ReviewQueue from "@/components/ReviewQueue";
+import Confetti from "@/components/Confetti";
+import { MasteryBadge, MasterySummary } from "@/components/MasteryBadge";
+import StudyPlan from "@/components/StudyPlan";
+import ExplainButtons from "@/components/ExplainButtons";
+import EmptyState from "@/components/EmptyState";
 import Pronunciation from "@/components/Pronunciation";
 import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
@@ -95,8 +114,23 @@ export type GenerateResult = {
   finalReview?: { questions: QuizQuestion[] };
 };
 
-type Section = "generate" | "my-guides" | "browse" | "arena" | "friends";
+type Section = "generate" | "my-guides" | "browse" | "arena" | "review" | "friends";
 type ResultView = "guide" | "quiz";
+
+/** Keyboard shortcuts shown by the `?` help overlay — every one of
+ *  these is wired up (see the keydown effect and CommandPalette). */
+const SHORTCUTS: Array<{ keys: string; description: string }> = [
+  { keys: "Ctrl/⌘ K", description: "Open the command palette" },
+  { keys: "?", description: "Show this shortcut help" },
+  { keys: "G then D", description: "Go to Generate" },
+  { keys: "G then G", description: "Go to Your Study Guides" },
+  { keys: "G then B", description: "Go to Browse" },
+  { keys: "G then A", description: "Go to Battle Arena" },
+  { keys: "G then R", description: "Go to Review queue" },
+  { keys: "G then F", description: "Go to Friends" },
+  { keys: "1–4", description: "Answer a Review question (in the Review queue)" },
+  { keys: "Enter", description: "Continue to the next Review question" },
+];
 
 /** The top nav bar is the section navigation — one section at a time. */
 const NAV_LINKS: { id: Section; label: string; icon: typeof Wand2 }[] = [
@@ -104,6 +138,7 @@ const NAV_LINKS: { id: Section; label: string; icon: typeof Wand2 }[] = [
   { id: "my-guides", label: "Your Study Guides", icon: Library },
   { id: "browse", label: "Browse", icon: Globe },
   { id: "arena", label: "Battle Arena", icon: Swords },
+  { id: "review", label: "Review", icon: RotateCcw },
   { id: "friends", label: "Friends", icon: Users },
 ];
 
@@ -158,6 +193,91 @@ export default function Home() {
   } | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
+  // Streaks + XP + daily goal, from real activity only (0 for a new user).
+  const activity = useActivity(user?.id ?? null);
+  const [darkMode, setDarkMode] = useState(false);
+  const [celebration, setCelebration] = useState<string | null>(null);
+  const [dueCount, setDueCount] = useState(0);
+  const [tutorPrefill, setTutorPrefill] = useState<{
+    message: string;
+    key: number;
+  } | null>(null);
+
+  // Dark mode follows the saved preference (lib/theme.ts).
+  useEffect(() => {
+    setDarkMode(getTheme() === "dark");
+  }, []);
+
+  function toggleDark() {
+    setDarkMode(toggleTheme() === "dark");
+  }
+
+  // Celebrate a streak milestone (3/7/14/30 days) once, when crossed.
+  useEffect(() => {
+    if (activity.milestone !== null) {
+      setCelebration(`🔥 ${activity.milestone}-day streak!`);
+    }
+  }, [activity.milestone]);
+
+  // How many weak concepts are due for review (nav badge).
+  useEffect(() => {
+    let cancelled = false;
+    loadAllErrors(user?.id ?? null)
+      .then((entries) => {
+        if (!cancelled) setDueCount(dueCountOf(entries));
+      })
+      .catch(() => {
+        if (!cancelled) setDueCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, section]);
+
+  // `g` then a letter jumps to a section (Linear-style, reliable only
+  // because every target is a real section). Never fires while typing.
+  const gPendingRef = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      )
+        return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (gPendingRef.current) {
+        gPendingRef.current = false;
+        const map: Record<string, Section> = {
+          d: "generate",
+          g: "my-guides",
+          b: "browse",
+          a: "arena",
+          r: "review",
+          f: "friends",
+        };
+        const next = map[e.key.toLowerCase()];
+        if (next) {
+          e.preventDefault();
+          goToSection(next);
+        }
+        return;
+      }
+      if (e.key.toLowerCase() === "g") {
+        gPendingRef.current = true;
+        window.setTimeout(() => {
+          gPendingRef.current = false;
+        }, 1200);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Guide navigation state
   const [collapsedModules, setCollapsedModules] = useState<Record<number, boolean>>({});
   const [activeModule, setActiveModule] = useState<number>(1);
@@ -169,6 +289,105 @@ export default function Home() {
   // a published or shared guide.
   const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
   const guideErrors = useGuideErrors(currentGuideId, user?.id ?? null);
+
+  /** Record an answer: error tracking + XP/streak, and celebrate when a
+   *  concept crosses into Mastered (2 correct in a row after a miss). */
+  function recordAnswer(answer: ErrorAnswerInput) {
+    const title = answer.conceptTitle.trim() || "Practice Quiz";
+    const before = guideErrors.records.find((r) => r.conceptTitle === title);
+    const after = applyAnswer(guideErrors.records, answer).find(
+      (r) => r.conceptTitle === title
+    );
+    guideErrors.record(answer);
+    activity.recordQuestion(answer.correct);
+    if (
+      after &&
+      after.misses > 0 &&
+      after.correctStreak >= MASTERY_STREAK &&
+      (!before || before.correctStreak < MASTERY_STREAK)
+    ) {
+      activity.recordConceptMastered();
+      setCelebration(`Mastered: ${after.conceptTitle}`);
+    }
+  }
+
+  /** "Explain simpler / deeper" — asks the tutor about one concept. */
+  function explainConcept(
+    level: "simpler" | "deeper",
+    conceptTitle: string,
+    definition: string
+  ) {
+    const message =
+      level === "simpler"
+        ? `Explain the concept "${conceptTitle}" in simpler terms, as if to a younger student. The definition given is: "${definition}". Use a short everyday analogy, then check I understood with one quick question.`
+        : `Go deeper on the concept "${conceptTitle}". The definition given is: "${definition}". Explain the underlying idea in more depth, with a harder example and one thing that often confuses people about it.`;
+    setTutorTitle(level === "simpler" ? "Explain it simpler" : "Go deeper");
+    setTutorContext(undefined);
+    setTutorPrefill({ message, key: Date.now() });
+    setTutorOpen(true);
+  }
+
+  /** Post-game "Review your misses": Battle Arena misses become weak
+   *  concepts on an arena guide key, so the Review queue picks them up
+   *  (due tomorrow, then 1 → 3 → 7 → 16 days). */
+  async function handleArenaMisses(
+    misses: Array<{
+      question: string;
+      picked: string;
+      correctAnswer: string;
+      explanation: string;
+    }>
+  ) {
+    const topic = result?.guideTitle ?? savedGame?.topic ?? "Battle Arena";
+    const key = `arena:${topic.slice(0, 80)}`;
+    try {
+      const records = await loadErrors(user?.id ?? null, key);
+      let next = records;
+      for (const m of misses) {
+        next = applyAnswer(next, {
+          source: "quiz",
+          moduleTitle: topic,
+          conceptTitle: `${topic} — Arena`,
+          question: m.question,
+          picked: m.picked,
+          correctAnswer: m.correctAnswer,
+          explanation: m.explanation,
+          correct: false,
+        });
+      }
+      await saveErrors(user?.id ?? null, key, next);
+    } catch {
+      // Best effort — the misses just won't appear in the queue.
+    }
+    goToSection("review");
+  }
+
+  // Command palette actions — every one of these really works.
+  const paletteActions: PaletteAction[] = [
+    { id: "go-generate", label: "Go to Generate", group: "Navigate", hint: "G D", run: () => goToSection("generate") },
+    { id: "go-guides", label: "Go to Your Study Guides", group: "Navigate", hint: "G G", run: () => goToSection("my-guides") },
+    { id: "go-browse", label: "Go to Browse", group: "Navigate", hint: "G B", run: () => goToSection("browse") },
+    { id: "go-arena", label: "Start Battle Arena", group: "Navigate", hint: "G A", run: () => goToSection("arena") },
+    { id: "go-review", label: "Open Review queue", group: "Navigate", hint: "G R", run: () => goToSection("review") },
+    { id: "go-friends", label: "Go to Friends", group: "Navigate", hint: "G F", run: () => goToSection("friends") },
+    ...(activity.state.lastGuide?.guideId
+      ? [
+          {
+            id: "continue",
+            label: `Continue: ${activity.state.lastGuide.title}`,
+            group: "Guide",
+            run: () => openGuideDetail(activity.state.lastGuide!.guideId!),
+          },
+        ]
+      : []),
+    {
+      id: "toggle-dark",
+      label: darkMode ? "Switch to light mode" : "Switch to dark mode",
+      group: "Appearance",
+      run: toggleDark,
+    },
+    { id: "open-tutor", label: "Open AI tutor", group: "Actions", run: () => setTutorOpen(true) },
+  ];
 
   // AI Edit
   const [editOpen, setEditOpen] = useState(false);
@@ -452,20 +671,28 @@ export default function Home() {
             ? "Saved to Your Study Guides."
             : "Generated, but could not save it to your account."
         );
-        setCurrentGuideId(
-          saved
-            ? `guide:${saved.id}`
-            : localGuideKey(
-                generated.guideTitle ?? "Study guide",
-                generated.studyGuide
-              )
+        const guideKey = saved
+          ? `guide:${saved.id}`
+          : localGuideKey(
+              generated.guideTitle ?? "Study guide",
+              generated.studyGuide
+            );
+        setCurrentGuideId(guideKey);
+        activity.recordGuideGenerated(
+          (inputText.trim() || generated.guideTitle || "Study guide").slice(0, 500),
+          saved?.id ?? null,
+          guideKey
         );
       } else {
-        setCurrentGuideId(
-          localGuideKey(
-            generated.guideTitle ?? "Study guide",
-            generated.studyGuide
-          )
+        const guideKey = localGuideKey(
+          generated.guideTitle ?? "Study guide",
+          generated.studyGuide
+        );
+        setCurrentGuideId(guideKey);
+        activity.recordGuideGenerated(
+          (inputText.trim() || generated.guideTitle || "Study guide").slice(0, 500),
+          null,
+          guideKey
         );
       }
       setAnswers({});
@@ -505,11 +732,16 @@ export default function Home() {
     setWorkspaceOpen(false);
     // The opened copy gets its own error-tracking key — the saved row id
     // when known, so your errors on it persist; a content hash otherwise.
-    setCurrentGuideId(
-      guideId
-        ? `guide:${guideId}`
-        : localGuideKey(saved.guideTitle ?? "Study guide", saved.studyGuide)
-    );
+    const guideKey = guideId
+      ? `guide:${guideId}`
+      : localGuideKey(saved.guideTitle ?? "Study guide", saved.studyGuide);
+    setCurrentGuideId(guideKey);
+    activity.saveLastGuide({
+      title: saved.guideTitle ?? "Study guide",
+      guideId: guideId ?? null,
+      guideKey,
+      openedAt: new Date().toISOString(),
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -570,7 +802,7 @@ export default function Home() {
     const q = quiz[qi];
     if (!q || answers[qi]) return;
     setAnswers((prev) => ({ ...prev, [qi]: opt }));
-    guideErrors.record({
+    recordAnswer({
       source: "quiz",
       moduleTitle: result?.guideTitle ?? "Practice Quiz",
       conceptTitle: "Practice Quiz",
@@ -646,6 +878,19 @@ export default function Home() {
 
   return (
     <div className="min-h-screen pb-24">
+      {celebration && (
+        <>
+          <Confetti
+            onDone={() => {
+              setCelebration(null);
+              activity.dismissMilestone();
+            }}
+          />
+          <div className="fixed bottom-5 left-1/2 z-[75] -translate-x-1/2 whitespace-nowrap rounded-full bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lift">
+            🎉 {celebration}
+          </div>
+        </>
+      )}
       {/* Top navigation bar — the section navigation for the whole app */}
       <header className="sticky top-0 z-50 border-b border-ink-100/70 bg-white/90 backdrop-blur-lg">
         <div className="mx-auto flex max-w-5xl items-center gap-2 px-4 py-3 sm:px-6">
@@ -685,11 +930,38 @@ export default function Home() {
                 }`}
               >
                 <Icon className="h-4 w-4" /> {label}
+                {id === "review" && dueCount > 0 && (
+                  <span className="rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                    {dueCount}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <div className="hidden sm:block">
+              <StreakWidget
+                streak={activity.streak}
+                xp={activity.xp}
+                todayAnswered={activity.today.questionsAnswered}
+                todayCorrect={activity.today.questionsCorrect}
+              />
+            </div>
+            <CommandPalette actions={paletteActions} shortcuts={SHORTCUTS} />
+            <button
+              type="button"
+              onClick={toggleDark}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              className="inline-flex items-center justify-center rounded-full border border-ink-200 bg-white p-2 text-ink-600 shadow-sm transition hover:border-brand-300 hover:text-brand-700"
+            >
+              {darkMode ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </button>
             <button
               type="button"
               onClick={() => setAuthOpen(true)}
@@ -744,6 +1016,11 @@ export default function Home() {
                 }`}
               >
                 <Icon className="h-4 w-4" /> {label}
+                {id === "review" && dueCount > 0 && (
+                  <span className="ml-auto rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                    {dueCount}
+                  </span>
+                )}
               </button>
             ))}
             <button
@@ -790,6 +1067,121 @@ export default function Home() {
               <Bot className="h-3.5 w-3.5" /> AI tutor
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Continue where you left off + first-run checklist — from real
+          activity only. The checklist hides itself once all three steps
+          are genuinely done. */}
+      {section === "generate" && !result && !loading && (
+        <div className="mt-6 space-y-4">
+          {activity.state.lastGuide?.guideId && (
+            <div className="card flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-ink-400">
+                  Continue where you left off
+                </p>
+                <p className="mt-1 truncate text-base font-bold text-ink-900">
+                  {activity.state.lastGuide.title}
+                </p>
+                <p className="text-xs font-medium text-ink-400">
+                  Last opened{" "}
+                  {new Date(
+                    activity.state.lastGuide.openedAt
+                  ).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  openGuideDetail(activity.state.lastGuide!.guideId!)
+                }
+                className="btn-primary"
+              >
+                <BookOpen className="h-4 w-4" /> Continue
+              </button>
+            </div>
+          )}
+          {!(
+            activity.checklist.generatedGuide &&
+            activity.checklist.answeredFive &&
+            activity.checklist.triedArena
+          ) && (
+            <div className="card p-4 sm:p-5">
+              <p className="text-sm font-bold tracking-tight text-ink-900">
+                Your first steps
+              </p>
+              <ul className="mt-2.5 space-y-2">
+                <li className="flex items-center gap-2.5 text-sm font-medium text-ink-700">
+                  {activity.checklist.generatedGuide ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-ink-200 text-[11px] font-extrabold text-ink-400">
+                      1
+                    </span>
+                  )}
+                  <span
+                    className={
+                      activity.checklist.generatedGuide
+                        ? "text-ink-400 line-through"
+                        : ""
+                    }
+                  >
+                    Generate your first guide
+                  </span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm font-medium text-ink-700">
+                  {activity.checklist.answeredFive ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-ink-200 text-[11px] font-extrabold text-ink-400">
+                      2
+                    </span>
+                  )}
+                  <span
+                    className={
+                      activity.checklist.answeredFive
+                        ? "text-ink-400 line-through"
+                        : ""
+                    }
+                  >
+                    Answer 5 questions ({activity.totalQuestionsAnswered}{" "}
+                    answered so far)
+                  </span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm font-medium text-ink-700">
+                  {activity.checklist.triedArena ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-ink-200 text-[11px] font-extrabold text-ink-400">
+                      3
+                    </span>
+                  )}
+                  <span
+                    className={
+                      activity.checklist.triedArena
+                        ? "text-ink-400 line-through"
+                        : ""
+                    }
+                  >
+                    Try Battle Arena
+                  </span>
+                  {!activity.checklist.triedArena && (
+                    <button
+                      type="button"
+                      onClick={() => goToSection("arena")}
+                      className="ml-auto rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-700 ring-1 ring-inset ring-brand-100 transition hover:bg-brand-100"
+                    >
+                      Play now
+                    </button>
+                  )}
+                </li>
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -1103,6 +1495,9 @@ export default function Home() {
                 </p>
               )}
 
+              <MasterySummary records={guideErrors.records} />
+              <StudyPlan testTiming={testTiming} modules={modules} />
+
               {result.summary && (
                 <div className="card p-5 sm:p-6">
                   <h2 className="text-sm font-bold tracking-tight text-ink-900">
@@ -1281,8 +1676,15 @@ export default function Home() {
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="chip">{concept.label}</span>
-                              <span className="text-xs font-semibold text-ink-400">
-                                Card {thisCard} of {totalCards}
+                              <span className="flex items-center gap-1.5">
+                                <MasteryBadge
+                                  record={guideErrors.records.find(
+                                    (r) => r.conceptTitle === concept.title
+                                  )}
+                                />
+                                <span className="text-xs font-semibold text-ink-400">
+                                  Card {thisCard} of {totalCards}
+                                </span>
                               </span>
                             </div>
                             <h3 className="mt-3 text-lg font-extrabold tracking-tight text-ink-900">
@@ -1339,6 +1741,11 @@ export default function Home() {
                                 {concept.memoryTip}
                               </p>
                             )}
+                            <ExplainButtons
+                              conceptTitle={concept.title}
+                              definition={concept.formulaOrDefinition}
+                              onExplain={explainConcept}
+                            />
                             {(concept.pronunciation || isVocabulary) && (
                               <Pronunciation
                                 term={concept.title}
@@ -1436,7 +1843,7 @@ export default function Home() {
                           example={mod.reasoningExample}
                           moduleTitle={mod.title}
                           conceptTitle={mod.concepts[0]?.title ?? mod.title}
-                          onAnswer={guideErrors.record}
+                          onAnswer={recordAnswer}
                         />
                       )}
 
@@ -1444,22 +1851,23 @@ export default function Home() {
                         <SectionCheckpoint
                           moduleTitle={mod.title}
                           questions={mod.checkpoint.questions}
-                          onAnswer={guideErrors.record}
+                          onAnswer={recordAnswer}
                           onProgress={(answered, correct) =>
                             setCheckpointByModule((prev) => ({
                               ...prev,
                               [mod.moduleNumber]: { answered, correct },
                             }))
                           }
-                          onFinish={(score) =>
+                          onFinish={(score) => {
+                            activity.recordSectionCompleted();
                             setBestScores((prev) => ({
                               ...prev,
                               [mod.moduleNumber]: Math.max(
                                 prev[mod.moduleNumber] ?? 0,
                                 score
                               ),
-                            }))
-                          }
+                            }));
+                          }}
                         />
                       )}
                         </>
@@ -1472,7 +1880,7 @@ export default function Home() {
                 <TargetedPractice
                   modules={modules}
                   onAskTutor={openPracticeTutor}
-                  onAnswer={guideErrors.record}
+                  onAnswer={recordAnswer}
                   onProgress={(answered, correct) =>
                     setPracticeProgress({ answered, correct })
                   }
@@ -1488,7 +1896,7 @@ export default function Home() {
                 weak={guideErrors.weak}
                 mastered={guideErrors.mastered}
                 signedIn={Boolean(user)}
-                onAnswer={guideErrors.record}
+                onAnswer={recordAnswer}
                 onClearErrors={guideErrors.clear}
               />
 
@@ -1546,7 +1954,7 @@ export default function Home() {
                     <SectionCheckpoint
                       moduleTitle="Final review"
                       questions={result.finalReview.questions}
-                      onAnswer={guideErrors.record}
+                      onAnswer={recordAnswer}
                     />
                   </div>
                 </div>
@@ -1747,6 +2155,21 @@ export default function Home() {
             user={user}
             initialGame={savedGame?.game}
             initialGameKey={savedGame?.key}
+            onAnswer={activity.recordQuestion}
+            onReviewMisses={handleArenaMisses}
+            onGameFinished={() => activity.recordArenaPlayed()}
+          />
+        </section>
+      )}
+
+      {/* Review queue — spaced repetition from your own mistakes */}
+      {section === "review" && (
+        <section className="mt-8 animate-fade-up">
+          <ReviewQueue
+            userId={user?.id ?? null}
+            educationLevel={educationLevel}
+            onActivity={activity.recordQuestion}
+            onGenerate={() => goToSection("generate")}
           />
         </section>
       )}
@@ -1761,6 +2184,7 @@ export default function Home() {
             onOpenGuide={openGuide}
             onOpenGuideDetail={openGuideDetail}
             onOpenGame={openGame}
+            onGenerate={() => goToSection("generate")}
           />
         </section>
       )}
@@ -1773,6 +2197,7 @@ export default function Home() {
             onOpenGuide={openGuide}
             onOpenGuideDetail={openGuideDetail}
             onOpenGame={openGame}
+            onGenerate={() => goToSection("generate")}
           />
         </section>
       )}
@@ -1783,22 +2208,13 @@ export default function Home() {
           {user ? (
             <Friends user={user} onFriendsChanged={setFriends} />
           ) : (
-            <div className="card p-6 text-center sm:p-8">
-              <h2 className="text-xl font-extrabold tracking-tight text-ink-900">
-                Friends
-              </h2>
-              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-ink-500">
-                Sign in to find friends by username, accept friend requests,
-                and send study guides to your friends.
-              </p>
-              <button
-                type="button"
-                onClick={() => setAuthOpen(true)}
-                className="btn-primary mx-auto mt-4 px-5 py-2.5"
-              >
-                <User className="h-4 w-4" /> Sign in
-              </button>
-            </div>
+            <EmptyState
+              icon={<Users className="h-6 w-6" />}
+              headline="Friends live here"
+              outcome="Sign in to find friends by username, accept friend requests, and send study guides to your friends."
+              buttonLabel="Sign in"
+              onAction={() => setAuthOpen(true)}
+            />
           )}
         </section>
       )}
@@ -1839,6 +2255,7 @@ export default function Home() {
         studyGuide={result?.studyGuide}
         context={tutorContext}
         title={tutorTitle}
+        prefill={tutorPrefill}
       />
 
       <FeedbackModal

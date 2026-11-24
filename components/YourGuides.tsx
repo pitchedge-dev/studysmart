@@ -33,6 +33,7 @@ import {
 import type { GameData } from "./BattleArena";
 import type { FriendEntry } from "./Friends";
 import type { GenerateResult } from "@/app/page";
+import EmptyState from "./EmptyState";
 
 type Friend = FriendEntry;
 
@@ -63,6 +64,7 @@ export default function YourGuides({
   onOpenGuide,
   onOpenGuideDetail,
   onOpenGame,
+  onGenerate,
 }: {
   user: AppUser | null;
   profile: Profile | null;
@@ -72,6 +74,8 @@ export default function YourGuides({
   /** Open a saved guide on its own dedicated page (/guide/[id]). */
   onOpenGuideDetail?: (id: string) => void;
   onOpenGame: (game: GameData, topic: string) => void;
+  /** Sends the user to Generate (empty-state button). */
+  onGenerate?: () => void;
 }) {
   const [guides, setGuides] = useState<StudyGuideRow[]>([]);
   const [favorites, setFavorites] = useState<StudyGuideRow[]>([]);
@@ -237,10 +241,15 @@ export default function YourGuides({
           </p>
         )}
         {!loading && guides.length === 0 && (
-          <p className="mt-4 text-sm leading-relaxed text-ink-500">
-            No saved guides yet. Generate a study guide or a Battle Arena game
-            and it will appear here.
-          </p>
+          <div className="mt-4">
+            <EmptyState
+              icon={<BookOpen className="h-6 w-6" />}
+              headline="Your study guides will live here"
+              outcome="Generate a study guide or a Battle Arena game and it is saved here automatically — open it anytime, publish it, or send it to a friend."
+              buttonLabel="Generate your first guide"
+              onAction={() => onGenerate?.()}
+            />
+          </div>
         )}
         <div className="mt-4 space-y-3">
           {guides.map((row) => (

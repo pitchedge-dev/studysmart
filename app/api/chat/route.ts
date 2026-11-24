@@ -15,10 +15,11 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { messages, studyGuide, context } = body as {
+    const { messages, studyGuide, context, hintMode } = body as {
       messages?: ChatMessage[];
       studyGuide?: string;
       context?: string;
+      hintMode?: boolean;
     };
 
     if (!Array.isArray(messages) || messages.length === 0) {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
         ? `\n\nAdditional context for this question (for example, the quiz question and the answer the student picked):\n${context}`
         : "";
 
-    const system = `You are StudySMART's AI Tutor, a patient and encouraging study assistant. ${guideContext}${extraContext} Answer clearly and accurately, grounded in the study guide and supplied context above. When asked to rewrite a section, return the rewritten section in Markdown. When explaining a wrong quiz answer, explain why the chosen answer is incorrect and why the correct answer is right, without simply restating the answer. Never invent study material or topics beyond what the user has supplied.`;
+    const system = `You are StudySMART's AI Tutor, a patient and encouraging study assistant. ${guideContext}${extraContext} Answer clearly and accurately, grounded in the study guide and supplied context above. When asked to rewrite a section, return the rewritten section in Markdown. When explaining a wrong quiz answer, explain why the chosen answer is incorrect and why the correct answer is right, without simply restating the answer. Never invent study material or topics beyond what the user has supplied.${hintMode ? ` HINT MODE IS ON — be Socratic, never give the answer straight away: first ask what the student has already tried and what they think the first step is, then give exactly ONE small hint at a time and wait for the student to try it. Only reveal the full answer after the student has attempted it, or after they ask for it directly.` : ""}`;
 
     // Walk the model fallback chain — each model tried at most once.
     let lastErr: unknown = null;

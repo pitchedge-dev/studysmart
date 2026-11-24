@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  BookOpen,
   Brain,
   CheckCircle2,
   Flame,
@@ -120,6 +121,13 @@ export default function BattleArena({
   user,
   initialGame,
   initialGameKey,
+  /** Called for every answered trivia question (drives XP + streak). */
+  onAnswer,
+  /** Called with the game's missed questions when the player asks to
+   *  review them — the parent sends them into the Review queue. */
+  onReviewMisses,
+  /** Called once when a trivia game finishes, with total correct/answered. */
+  onGameFinished,
 }: {
   guideTopic?: string;
   guideContent?: string;
@@ -130,6 +138,16 @@ export default function BattleArena({
   initialGame?: GameData | null;
   /** Change this to re-load initialGame. */
   initialGameKey?: number;
+  onAnswer?: (correct: boolean) => void;
+  onReviewMisses?: (
+    misses: Array<{
+      question: string;
+      picked: string;
+      correctAnswer: string;
+      explanation: string;
+    }>
+  ) => void;
+  onGameFinished?: (correct: number, answered: number) => void;
 } = {}) {
   const [topic, setTopic] = useState("");
   const [mode, setMode] = useState<Mode>("1 Player");
@@ -170,6 +188,16 @@ export default function BattleArena({
     combo: number;
     total: number;
   } | null>(null);
+  // Missed trivia questions this game, for the post-game
+  // "Review your misses" button (they go into the Review queue).
+  const [misses, setMisses] = useState<
+    Array<{
+      question: string;
+      picked: string;
+      correctAnswer: string;
+      explanation: string;
+    }>
+  >([]);
 
   // Flashcards state
   const [cardIndex, setCardIndex] = useState(0);
@@ -244,6 +272,7 @@ export default function BattleArena({
     setPickedBack(null);
     setMatchScore(0);
     setMatchMessage(null);
+    setMisses([]);
   }
 
   // Load a saved / published game passed in from Your Study Guides or Browse.
@@ -378,6 +407,19 @@ export default function BattleArena({
     setTimedOut(true);
     setSelected("__timeout__");
     setLastAward(null);
+    if (game) {
+      const q = game.questions[current];
+      setMisses((prev) => [
+        ...prev,
+        {
+          question: q.question,
+          picked: "(time ran out)",
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+        },
+      ]);
+    }
+    onAnswer?.(false);
     setStreaks((prev) => {
       const next = [...prev];
       next[turn] = 0;
@@ -423,6 +465,7 @@ export default function BattleArena({
     const q = game.questions[current];
     setSelected(option);
     if (option === q.correctAnswer) {
+      onAnswer?.(true);
       // Points scale with speed (up to +50% of the base for a fast answer)
       // and streaks pay a combo bonus: 3 in a row = +25, 4 = +50, and so on.
       const speedBonus =
@@ -459,6 +502,16 @@ export default function BattleArena({
       playArenaSound("correct", muted);
     } else {
       // A miss breaks the streak and costs a life.
+      onAnswer?.(false);
+      setMisses((prev) => [
+        ...prev,
+        {
+          question: q.question,
+          picked: option,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+        },
+      ]);
       setLastAward(null);
       setStreaks((prev) => {
         const next = [...prev];
@@ -481,6 +534,10 @@ export default function BattleArena({
     setLastAward(null);
     if (current + 1 >= game.questions.length || lives <= 0) {
       setFinished(true);
+      onGameFinished?.(
+        playerStats.reduce((n, s) => n + s.correct, 0),
+        playerStats.reduce((n, s) => n + s.answered, 0)
+      );
     } else {
       setCurrent(current + 1);
       setSelected(null);
@@ -1172,6 +1229,17 @@ export default function BattleArena({
             <button type="button" onClick={replayGame} className="btn-primary">
               <RotateCcw className="h-4 w-4" /> Replay this game
             </button>
+            {misses.length > 0 && onReviewMisses && (
+              <button
+                type="button"
+                onClick={() => onReviewMisses(misses)}
+                className="btn-secondary"
+                title="Send the questions you missed into your Review queue for spaced practice"
+              >
+                <BookOpen className="h-4 w-4 text-brand-600" /> Review your
+                misses ({misses.length})
+              </button>
+            )}
             <button type="button" onClick={restart} className="btn-secondary">
               <Play className="h-4 w-4" /> New Game
             </button>

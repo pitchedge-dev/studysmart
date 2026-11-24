@@ -32,6 +32,11 @@ export type GuideErrorRecord = {
   lastPicked?: string;
   lastCorrect?: string;
   lastExplanation?: string;
+  /** Spaced-repetition schedule (migration 0004). Undefined until the
+   *  concept has been answered at least once after the schedule exists;
+   *  a missing date means "due now". */
+  nextReviewAt?: string;
+  reviewIntervalDays?: number;
 };
 
 /** A concept counts as weak once missed and not yet mastered. */
@@ -72,7 +77,10 @@ export function masteredConcepts(
   );
 }
 
-/** Fold one answered question into the per-concept records. */
+/** Fold one answered question into the per-concept records. Also
+ *  advances the spaced-repetition schedule: wrong = due tomorrow,
+ *  correct = next interval along 1 → 3 → 7 → 16 days. The 2-in-a-row
+ *  mastery rule (MASTERY_STREAK) is unchanged. */
 export function applyAnswer(
   records: GuideErrorRecord[],
   answer: ErrorAnswerInput
@@ -91,6 +99,15 @@ export function applyAnswer(
   next.totalAttempts += 1;
   if (answer.correct) {
     next.correctStreak += 1;
+    // Advance the review interval: 1 → 3 → 7 → 16 days (stays at 16).
+    const intervals = [1, 3, 7, 16];
+    const current = next.reviewIntervalDays ?? 1;
+    const idx = intervals.indexOf(current);
+    const interval = intervals[Math.min((idx === -1 ? 1 : idx + 1), intervals.length - 1)];
+    next.reviewIntervalDays = interval;
+    const d = new Date();
+    d.setDate(d.getDate() + interval);
+    next.nextReviewAt = d.toISOString().slice(0, 10);
   } else {
     next.misses += 1;
     next.correctStreak = 0;
@@ -98,6 +115,11 @@ export function applyAnswer(
     next.lastPicked = answer.picked;
     next.lastCorrect = answer.correctAnswer;
     next.lastExplanation = answer.explanation;
+    // Wrong: due again tomorrow.
+    next.reviewIntervalDays = 1;
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    next.nextReviewAt = d.toISOString().slice(0, 10);
   }
   if (!next.moduleTitle) next.moduleTitle = answer.moduleTitle;
   const rest = records.filter((r) => r.conceptTitle !== conceptTitle);
@@ -147,6 +169,8 @@ function toRow(
     last_picked: r.lastPicked ?? null,
     last_correct: r.lastCorrect ?? null,
     last_explanation: r.lastExplanation ?? null,
+    next_review_at: r.nextReviewAt ?? null,
+    review_interval_days: r.reviewIntervalDays ?? null,
   };
 }
 
@@ -161,6 +185,8 @@ function fromRow(row: GuideErrorRow): GuideErrorRecord {
     lastPicked: row.last_picked ?? undefined,
     lastCorrect: row.last_correct ?? undefined,
     lastExplanation: row.last_explanation ?? undefined,
+    nextReviewAt: row.next_review_at ?? undefined,
+    reviewIntervalDays: row.review_interval_days ?? undefined,
   };
 }
 

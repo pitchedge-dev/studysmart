@@ -245,9 +245,15 @@ export default function Friends({
           </p>
         )}
         {!loading && accepted.length === 0 && (
-          <p className="mt-2 text-sm text-ink-500">
-            No friends yet. Search for a username above to add one.
-          </p>
+          <div className="mt-2 rounded-2xl border border-dashed border-brand-300 bg-white/70 p-5 text-center">
+            <p className="text-sm font-bold text-ink-900">
+              No friends yet — your study crew will live here
+            </p>
+            <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-ink-500">
+              Search for a username above to add a friend. Once you are
+              friends, you can send each other study guides.
+            </p>
+          </div>
         )}
         <div className="mt-2 space-y-2">
           {accepted.map((row) => {

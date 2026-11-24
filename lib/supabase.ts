@@ -437,6 +437,9 @@ export type GuideErrorRow = {
   last_picked?: string | null;
   last_correct?: string | null;
   last_explanation?: string | null;
+  /** Spaced-repetition schedule (migration 0004). Null until set. */
+  next_review_at?: string | null;
+  review_interval_days?: number | null;
   updated_at?: string;
 };
 
@@ -459,6 +462,26 @@ export async function listGuideErrors(
   return (data as GuideErrorRow[]) ?? [];
 }
 
+/** All of one user's error rows, across every guide copy — the raw
+ *  material for the spaced-repetition Review queue. Returns [] when
+ *  Supabase is not configured or the table is unreachable. */
+export async function listAllGuideErrors(
+  userId: string
+): Promise<GuideErrorRow[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb
+    .from("guide_errors")
+    .select("*")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false });
+  if (error) {
+    console.error("[supabase] list all guide errors failed:", error.message);
+    return [];
+  }
+  return (data as GuideErrorRow[]) ?? [];
+}
+
 export async function upsertGuideErrors(
   userId: string,
   guideKey: string,
@@ -467,25 +490,44 @@ export async function upsertGuideErrors(
   const sb = getSupabase();
   if (!sb) return false;
   if (records.length === 0) return true;
-  const { error } = await sb.from("guide_errors").upsert(
-    records.map((r) => ({
-      user_id: userId,
-      guide_key: guideKey,
-      concept_title: r.concept_title,
-      module_title: r.module_title,
-      misses: r.misses,
-      correct_streak: r.correct_streak,
-      total_attempts: r.total_attempts,
-      last_question: r.last_question ?? null,
-      last_picked: r.last_picked ?? null,
-      last_correct: r.last_correct ?? null,
-      last_explanation: r.last_explanation ?? null,
-      updated_at: new Date().toISOString(),
-    })),
-    { onConflict: "user_id,guide_key,concept_title" }
-  );
-  if (error) {
+  const rows = records.map((r) => ({
+    user_id: userId,
+    guide_key: guideKey,
+    concept_title: r.concept_title,
+    module_title: r.module_title,
+    misses: r.misses,
+    correct_streak: r.correct_streak,
+    total_attempts: r.total_attempts,
+    last_question: r.last_question ?? null,
+    last_picked: r.last_picked ?? null,
+    last_correct: r.last_correct ?? null,
+    last_explanation: r.last_explanation ?? null,
+    next_review_at: r.next_review_at ?? null,
+    review_interval_days: r.review_interval_days ?? null,
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await sb
+    .from("guide_errors")
+    .upsert(rows, { onConflict: "user_id,guide_key,concept_title" });
+  if (!error) return true;
+  // The spaced-repetition columns come from migration 0004, which may
+  // not be applied live yet. If the upsert failed because those columns
+  // do not exist, retry without them — the errors still get saved.
+  const missingColumn =
+    error.code === "42703" ||
+    /next_review_at|review_interval_days/i.test(error.message);
+  if (!missingColumn) {
     console.error("[supabase] save guide errors failed:", error.message);
+    return false;
+  }
+  const legacyRows = rows.map(
+    ({ next_review_at: _n, review_interval_days: _i, ...rest }) => rest
+  );
+  const retry = await sb
+    .from("guide_errors")
+    .upsert(legacyRows, { onConflict: "user_id,guide_key,concept_title" });
+  if (retry.error) {
+    console.error("[supabase] save guide errors failed:", retry.error.message);
     return false;
   }
   return true;
