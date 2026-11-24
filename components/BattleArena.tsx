@@ -106,12 +106,12 @@ function rankFor(accuracy: number, bestStreak: number): string {
 }
 
 const CONFETTI_COLORS = [
-  "#6366f1",
-  "#f59e0b",
-  "#10b981",
+  "rgb(var(--brand-500))",
+  "rgb(var(--accent-500))",
+  "var(--success)",
   "#f43f5e",
-  "#8b5cf6",
-  "#facc15",
+  "rgb(var(--brand-400))",
+  "rgb(var(--accent-400))",
 ];
 
 export default function BattleArena({

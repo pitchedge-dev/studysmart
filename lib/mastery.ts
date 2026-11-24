@@ -32,25 +32,25 @@ export const MASTERY_META: Record<
   Attempted: {
     color: "text-ink-600",
     bg: "bg-ink-100",
-    ring: "#8f88b5",
+    ring: "rgb(var(--mastery-attempted))",
     label: "Attempted",
   },
   Familiar: {
-    color: "text-sky-700",
-    bg: "bg-sky-50",
-    ring: "#38bdf8",
+    color: "text-accent-700",
+    bg: "bg-accent-50",
+    ring: "rgb(var(--mastery-familiar))",
     label: "Familiar",
   },
   Proficient: {
     color: "text-brand-700",
     bg: "bg-brand-50",
-    ring: "#6366f1",
+    ring: "rgb(var(--mastery-proficient))",
     label: "Proficient",
   },
   Mastered: {
     color: "text-emerald-700",
     bg: "bg-emerald-50",
-    ring: "#10b981",
+    ring: "var(--mastery-mastered)",
     label: "Mastered",
   },
 };

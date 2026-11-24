@@ -9,6 +9,8 @@ import {
   type AppUser,
   type Profile,
 } from "@/lib/supabase";
+import ThemePicker from "@/components/ThemePicker";
+import type { StyleId } from "@/lib/style";
 
 function isValidUsername(value: string): boolean {
   return /^[a-zA-Z0-9_]{3,20}$/.test(value);
@@ -20,12 +22,16 @@ export default function AuthModal({
   user,
   profile,
   onAuthChanged,
+  style,
+  onStyleChange,
 }: {
   open: boolean;
   onClose: () => void;
   user: AppUser | null;
   profile: Profile | null;
   onAuthChanged: () => void;
+  style: StyleId;
+  onStyleChange: (id: StyleId) => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -112,7 +118,7 @@ export default function AuthModal({
           password,
         });
         if (error) {
-          setMessage(error.message);
+          setMessage(friendlyAuthError(error.message));
           setBusy(false);
           return;
         }
@@ -280,6 +286,17 @@ export default function AuthModal({
             </button>
           </div>
         )}
+
+        {/* Style picker lives in Account too — it is per-device, and it
+            syncs to the account when signed in. */}
+        <div className="mt-5 border-t border-ink-100 pt-4">
+          <ThemePicker
+            variant="panel"
+            style={style}
+            onStyleChange={onStyleChange}
+            userId={user?.id ?? null}
+          />
+        </div>
       </div>
     </div>
   );

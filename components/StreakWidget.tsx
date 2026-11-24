@@ -39,7 +39,7 @@ export default function StreakWidget({
         title={`${streak}-day study streak`}
       >
         <Flame
-          className={`h-4 w-4 ${streak > 0 ? "fill-amber-400 text-amber-500" : "text-ink-300"}`}
+          className={`h-4 w-4 ${streak > 0 ? "fill-accent-400 text-accent-500" : "text-ink-300"}`}
         />
         {streak}
       </span>
@@ -48,7 +48,7 @@ export default function StreakWidget({
         className="inline-flex items-center gap-1 text-sm font-extrabold text-ink-800"
         title={`${xp} XP earned from correct answers, completed sections, and mastered concepts`}
       >
-        <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+        <Star className="h-4 w-4 fill-accent-400 text-accent-500" />
         {xp.toLocaleString()}
       </span>
       <span className="h-4 w-px bg-ink-200 dark:bg-ink-700" aria-hidden />
@@ -67,7 +67,9 @@ export default function StreakWidget({
             cy="16"
             r={r}
             fill="none"
-            stroke={goalDone ? "#10b981" : "#6366f1"}
+            style={{
+              stroke: goalDone ? "var(--success)" : "rgb(var(--brand-500))",
+            }}
             strokeWidth="3.5"
             strokeLinecap="round"
             strokeDasharray={circumference}

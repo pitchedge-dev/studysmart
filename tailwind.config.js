@@ -1,4 +1,16 @@
 /** @type {import('tailwindcss').Config} */
+// Brand / accent / ink are CSS variables (see app/globals.css), set per
+// site style (data-style on <html>) and per light/dark mode. Wiring the
+// Tailwind scales to the variables makes every existing brand-*/accent-*/
+// ink-* class follow the active style automatically.
+const withAlpha = (name) => ({ opacityValue }) =>
+  opacityValue === undefined
+    ? `rgb(var(--${name}))`
+    : `rgb(var(--${name}) / ${opacityValue})`;
+
+const scale = (prefix, stops) =>
+  Object.fromEntries(stops.map((s) => [s, withAlpha(`${prefix}-${s}`)]));
+
 module.exports = {
   darkMode: "class",
   content: [
@@ -8,41 +20,9 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        brand: {
-          50: "#eef2ff",
-          100: "#e0e7ff",
-          200: "#c7d2fe",
-          300: "#a5b4fc",
-          400: "#818cf8",
-          500: "#6366f1",
-          600: "#4f46e5",
-          700: "#4338ca",
-          800: "#3730a3",
-          900: "#312e81",
-          950: "#1e1b4b",
-        },
-        accent: {
-          50: "#fffbeb",
-          100: "#fef3c7",
-          200: "#fde68a",
-          300: "#fcd34d",
-          400: "#fbbf24",
-          500: "#f59e0b",
-          600: "#d97706",
-          700: "#b45309",
-        },
-        ink: {
-          50: "#f6f6fb",
-          100: "#eceaf6",
-          200: "#d9d6ec",
-          300: "#b9b3d6",
-          400: "#8f88b5",
-          500: "#6b688f",
-          600: "#514d73",
-          700: "#3b3852",
-          800: "#28263d",
-          900: "#17152b",
-        },
+        brand: scale("brand", [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]),
+        accent: scale("accent", [50, 100, 200, 300, 400, 500, 600, 700]),
+        ink: scale("ink", [50, 100, 200, 300, 400, 500, 600, 700, 800, 900]),
       },
       fontFamily: {
         sans: [
@@ -60,7 +40,7 @@ module.exports = {
       boxShadow: {
         soft: "0 1px 2px rgba(23,21,43,0.05), 0 8px 24px -12px rgba(23,21,43,0.14)",
         lift: "0 2px 4px rgba(23,21,43,0.06), 0 16px 40px -16px rgba(23,21,43,0.22)",
-        glow: "0 0 0 1px rgba(99,102,241,0.18), 0 12px 32px -8px rgba(79,70,229,0.45)",
+        glow: "0 0 0 1px rgb(var(--brand-500) / 0.18), 0 12px 32px -8px rgb(var(--brand-600) / 0.45)",
         card: "0 1px 3px rgba(23,21,43,0.06), 0 10px 30px -18px rgba(23,21,43,0.25)",
       },
       borderRadius: {

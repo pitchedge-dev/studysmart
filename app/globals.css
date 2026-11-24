@@ -2,25 +2,190 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------- Site styles (themes) ----------
+   `data-style` on <html> picks one of 5 themes (lib/style.ts). The
+   brand, accent and ink scales are RGB triplets, wired into Tailwind in
+   tailwind.config.js, so every brand/accent/ink utility class follows the
+   active style. Semantic vars (--surface, --text, --tint-*, ...) are
+   defined per theme AND per light/dark mode and drive the .dark
+   overrides below. Scale vars intentionally do NOT change in dark mode:
+   components use `dark:` variants against the light scale (e.g.
+   dark:bg-ink-800 = a dark surface), and those must keep working. */
+:root,
+:root[data-style="indigo"] {
+  --brand-50: 238 242 255; --brand-100: 224 231 255; --brand-200: 199 210 254;
+  --brand-300: 165 180 252; --brand-400: 129 140 248; --brand-500: 99 102 241;
+  --brand-600: 79 70 229; --brand-700: 67 56 202; --brand-800: 55 48 163;
+  --brand-900: 49 46 129; --brand-950: 30 27 75;
+  --accent-50: 255 251 235; --accent-100: 254 243 199; --accent-200: 253 230 138;
+  --accent-300: 252 211 77; --accent-400: 251 191 36; --accent-500: 245 158 11;
+  --accent-600: 217 119 6; --accent-700: 180 83 9;
+  --ink-50: 246 246 251; --ink-100: 236 234 246; --ink-200: 217 214 236;
+  --ink-300: 185 179 214; --ink-400: 143 136 181; --ink-500: 107 104 143;
+  --ink-600: 81 77 115; --ink-700: 59 56 82; --ink-800: 40 38 61;
+  --ink-900: 23 21 43;
+  --page-bg: #f6f6fb; --surface: #ffffff; --surface-2: #f6f6fb;
+  --surface-3: #eceaf6; --border: #d9d6ec; --border-strong: #b9b3d6;
+  --text: #3b3852; --text-dim: #6b688f; --text-strong: #17152b;
+  --muted: #8f88b5; --muted-strong: #6b688f;
+  --tint-brand: #eef2ff; --tint-brand-text: #4338ca;
+  --tint-accent: #fffbeb; --tint-accent-text: #b45309;
+  --success: #10b981; --focus-hl-bg: #fbda83; --focus-hl-text: #451a03;
+}
+:root.dark,
+:root.dark[data-style="indigo"] {
+  --page-bg: #131022; --surface: #221f3d; --surface-2: #1c1933;
+  --surface-3: #2e2a4d; --border: #3b3852; --border-strong: #514d73;
+  --text: #eceaf6; --text-dim: #d9d6ec; --text-strong: #f6f6fb;
+  --muted: #8f88b5; --muted-strong: #b9b3d6;
+  --tint-brand: #312e81; --tint-brand-text: #c7d2fe;
+  --tint-accent: #451a03; --tint-accent-text: #fde68a;
+  --success: #10b981; --focus-hl-bg: #b45309; --focus-hl-text: #fef3c7;
+}
+:root[data-style="midnight"] {
+  --brand-50: 245 243 255; --brand-100: 237 233 254; --brand-200: 221 214 254;
+  --brand-300: 196 181 253; --brand-400: 167 139 250; --brand-500: 139 92 246;
+  --brand-600: 124 58 237; --brand-700: 109 40 217; --brand-800: 91 33 182;
+  --brand-900: 76 29 149; --brand-950: 46 16 101;
+  --accent-50: 236 254 255; --accent-100: 207 250 254; --accent-200: 165 243 252;
+  --accent-300: 103 232 249; --accent-400: 34 211 238; --accent-500: 6 182 212;
+  --accent-600: 8 145 178; --accent-700: 14 116 144;
+  --ink-50: 248 250 252; --ink-100: 241 245 249; --ink-200: 226 232 240;
+  --ink-300: 203 213 225; --ink-400: 148 163 184; --ink-500: 100 116 139;
+  --ink-600: 71 85 105; --ink-700: 51 65 85; --ink-800: 30 41 59;
+  --ink-900: 15 23 42;
+  --page-bg: #f1f2f8; --surface: #ffffff; --surface-2: #f1f2f8;
+  --surface-3: #e2e8f0; --border: #e2e8f0; --border-strong: #cbd5e1;
+  --text: #334155; --text-dim: #64748b; --text-strong: #0f172a;
+  --muted: #94a3b8; --muted-strong: #64748b;
+  --tint-brand: #f5f3ff; --tint-brand-text: #6d28d9;
+  --tint-accent: #ecfeff; --tint-accent-text: #0e7490;
+  --success: #34d399; --focus-hl-bg: #a5f3fc; --focus-hl-text: #083344;
+}
+:root.dark[data-style="midnight"] {
+  --page-bg: #050510; --surface: #0e0e1f; --surface-2: #0a0a18;
+  --surface-3: #1a1a30; --border: #262640; --border-strong: #3a3a5c;
+  --text: #e2e8f0; --text-dim: #cbd5e1; --text-strong: #f8fafc;
+  --muted: #94a3b8; --muted-strong: #cbd5e1;
+  --tint-brand: #4c1d95; --tint-brand-text: #ddd6fe;
+  --tint-accent: #083344; --tint-accent-text: #a5f3fc;
+  --success: #34d399; --focus-hl-bg: #0e7490; --focus-hl-text: #ecfeff;
+}
+:root[data-style="forest"] {
+  --brand-50: 240 253 244; --brand-100: 220 252 231; --brand-200: 187 247 208;
+  --brand-300: 134 239 172; --brand-400: 74 222 128; --brand-500: 34 197 94;
+  --brand-600: 22 163 74; --brand-700: 21 128 61; --brand-800: 22 101 52;
+  --brand-900: 20 83 45; --brand-950: 5 46 22;
+  --accent-50: 255 251 235; --accent-100: 254 243 199; --accent-200: 253 230 138;
+  --accent-300: 252 211 77; --accent-400: 251 191 36; --accent-500: 245 158 11;
+  --accent-600: 217 119 6; --accent-700: 180 83 9;
+  --ink-50: 250 250 249; --ink-100: 245 245 244; --ink-200: 231 229 228;
+  --ink-300: 214 211 209; --ink-400: 168 162 158; --ink-500: 120 113 108;
+  --ink-600: 87 83 78; --ink-700: 68 64 60; --ink-800: 41 37 36;
+  --ink-900: 28 25 23;
+  --page-bg: #f3f6ef; --surface: #fffdf7; --surface-2: #f3f6ef;
+  --surface-3: #e7e5e4; --border: #e7e5e4; --border-strong: #d6d3d1;
+  --text: #44403c; --text-dim: #78716c; --text-strong: #1c1917;
+  --muted: #a8a29e; --muted-strong: #78716c;
+  --tint-brand: #f0fdf4; --tint-brand-text: #15803d;
+  --tint-accent: #fffbeb; --tint-accent-text: #b45309;
+  --success: #16a34a; --focus-hl-bg: #fde68a; --focus-hl-text: #451a03;
+}
+:root.dark[data-style="forest"] {
+  --page-bg: #0a1710; --surface: #122019; --surface-2: #0d1a12;
+  --surface-3: #1b2f24; --border: #23402e; --border-strong: #2f5540;
+  --text: #e7e5e4; --text-dim: #d6d3d1; --text-strong: #fafaf9;
+  --muted: #a8a29e; --muted-strong: #d6d3d1;
+  --tint-brand: #14532d; --tint-brand-text: #bbf7d0;
+  --tint-accent: #451a03; --tint-accent-text: #fde68a;
+  --success: #4ade80; --focus-hl-bg: #b45309; --focus-hl-text: #fef3c7;
+}
+:root[data-style="sunset"] {
+  --brand-50: 255 247 237; --brand-100: 255 237 213; --brand-200: 254 215 170;
+  --brand-300: 253 186 116; --brand-400: 251 146 60; --brand-500: 249 115 22;
+  --brand-600: 234 88 12; --brand-700: 194 65 12; --brand-800: 154 52 18;
+  --brand-900: 124 45 18; --brand-950: 67 20 7;
+  --accent-50: 253 244 255; --accent-100: 250 232 255; --accent-200: 245 208 254;
+  --accent-300: 240 171 252; --accent-400: 232 121 249; --accent-500: 217 70 239;
+  --accent-600: 192 38 211; --accent-700: 162 28 175;
+  --ink-50: 250 250 249; --ink-100: 245 245 244; --ink-200: 231 229 228;
+  --ink-300: 214 211 209; --ink-400: 168 162 158; --ink-500: 120 113 108;
+  --ink-600: 87 83 78; --ink-700: 68 64 60; --ink-800: 41 37 36;
+  --ink-900: 28 25 23;
+  --page-bg: #fff6f1; --surface: #ffffff; --surface-2: #fff6f1;
+  --surface-3: #e7e5e4; --border: #e7e5e4; --border-strong: #d6d3d1;
+  --text: #44403c; --text-dim: #78716c; --text-strong: #1c1917;
+  --muted: #a8a29e; --muted-strong: #78716c;
+  --tint-brand: #fff7ed; --tint-brand-text: #c2410c;
+  --tint-accent: #fdf4ff; --tint-accent-text: #a21caf;
+  --success: #10b981; --focus-hl-bg: #fed7aa; --focus-hl-text: #7c2d12;
+}
+:root.dark[data-style="sunset"] {
+  --page-bg: #1c0e18; --surface: #2a1424; --surface-2: #22101d;
+  --surface-3: #38202f; --border: #47253d; --border-strong: #5f3350;
+  --text: #e7e5e4; --text-dim: #d6d3d1; --text-strong: #fafaf9;
+  --muted: #a8a29e; --muted-strong: #d6d3d1;
+  --tint-brand: #7c2d12; --tint-brand-text: #fed7aa;
+  --tint-accent: #4a044e; --tint-accent-text: #f5d0fe;
+  --success: #34d399; --focus-hl-bg: #c2410c; --focus-hl-text: #ffedd5;
+}
+:root[data-style="ocean"] {
+  --brand-50: 240 253 250; --brand-100: 204 251 241; --brand-200: 153 246 228;
+  --brand-300: 94 234 212; --brand-400: 45 212 191; --brand-500: 20 184 166;
+  --brand-600: 13 148 136; --brand-700: 15 118 110; --brand-800: 17 94 89;
+  --brand-900: 19 78 74; --brand-950: 4 47 46;
+  --accent-50: 239 246 255; --accent-100: 219 234 254; --accent-200: 191 219 254;
+  --accent-300: 147 197 253; --accent-400: 96 165 250; --accent-500: 59 130 246;
+  --accent-600: 37 99 235; --accent-700: 29 78 216;
+  --ink-50: 248 250 252; --ink-100: 241 245 249; --ink-200: 226 232 240;
+  --ink-300: 203 213 225; --ink-400: 148 163 184; --ink-500: 100 116 139;
+  --ink-600: 71 85 105; --ink-700: 51 65 85; --ink-800: 30 41 59;
+  --ink-900: 15 23 42;
+  --page-bg: #eff7f7; --surface: #ffffff; --surface-2: #eff7f7;
+  --surface-3: #e2e8f0; --border: #e2e8f0; --border-strong: #cbd5e1;
+  --text: #334155; --text-dim: #64748b; --text-strong: #0f172a;
+  --muted: #94a3b8; --muted-strong: #64748b;
+  --tint-brand: #f0fdfa; --tint-brand-text: #0f766e;
+  --tint-accent: #eff6ff; --tint-accent-text: #1d4ed8;
+  --success: #14b8a6; --focus-hl-bg: #99f6e4; --focus-hl-text: #134e4a;
+}
+:root.dark[data-style="ocean"] {
+  --page-bg: #06181d; --surface: #0c262e; --surface-2: #081f26;
+  --surface-3: #14333d; --border: #1b3f4b; --border-strong: #28586a;
+  --text: #e2e8f0; --text-dim: #cbd5e1; --text-strong: #f8fafc;
+  --muted: #94a3b8; --muted-strong: #cbd5e1;
+  --tint-brand: #134e4a; --tint-brand-text: #99f6e4;
+  --tint-accent: #172554; --tint-accent-text: #bfdbfe;
+  --success: #2dd4bf; --focus-hl-bg: #0f766e; --focus-hl-text: #f0fdfa;
+}
+/* Mastery + streak colors follow the active style. */
+:root {
+  --mastery-attempted: var(--ink-400);
+  --mastery-familiar: var(--accent-400);
+  --mastery-proficient: var(--brand-500);
+  --mastery-mastered: var(--success);
+}
+
 /* ---------- Base ---------- */
 html {
   scroll-behavior: smooth;
 }
 body {
   @apply bg-ink-50 text-ink-900 antialiased;
+  background-color: var(--page-bg);
   background-image:
-    radial-gradient(60rem 30rem at 85% -10%, rgba(99, 102, 241, 0.10), transparent 60%),
-    radial-gradient(50rem 26rem at -10% 0%, rgba(245, 158, 11, 0.08), transparent 55%);
+    radial-gradient(60rem 30rem at 85% -10%, rgb(var(--brand-500) / 0.10), transparent 60%),
+    radial-gradient(50rem 26rem at -10% 0%, rgb(var(--accent-500) / 0.08), transparent 55%);
   background-attachment: fixed;
   font-feature-settings: "cv11", "ss01";
   text-rendering: optimizeLegibility;
 }
 ::selection {
-  background: #c7d2fe;
-  color: #1e1b4b;
+  background: rgb(var(--brand-200));
+  color: rgb(var(--brand-900));
 }
 :focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid rgb(var(--brand-500));
   outline-offset: 2px;
 }
 ::-webkit-scrollbar {
@@ -28,12 +193,12 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d9d6ec;
+  background: rgb(var(--ink-200));
   border-radius: 999px;
-  border: 2px solid #f6f6fb;
+  border: 2px solid rgb(var(--ink-50));
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #b9b3d6;
+  background: rgb(var(--ink-300));
 }
 
 /* ---------- Shared component classes ---------- */
@@ -97,15 +262,15 @@ body {
   }
   .hero-glow {
     background:
-      radial-gradient(36rem 18rem at 50% -4rem, rgba(99, 102, 241, 0.22), transparent 65%),
-      radial-gradient(24rem 12rem at 88% 0%, rgba(245, 158, 11, 0.16), transparent 60%);
+      radial-gradient(36rem 18rem at 50% -4rem, rgb(var(--brand-500) / 0.22), transparent 65%),
+      radial-gradient(24rem 12rem at 88% 0%, rgb(var(--accent-500) / 0.16), transparent 60%);
   }
   .shimmer-bar {
     background: linear-gradient(
       90deg,
-      #e0e7ff 25%,
-      #fde68a 50%,
-      #e0e7ff 75%
+      rgb(var(--brand-100)) 25%,
+      rgb(var(--accent-200)) 50%,
+      rgb(var(--brand-100)) 75%
     );
     background-size: 200% 100%;
     animation: shimmer 1.8s linear infinite;
@@ -256,42 +421,42 @@ body {
   animation: arena-pop 0.3s ease-out;
 }
 
-/* ---------- Dark mode (first-class theme, indigo + amber kept) ----------
+/* ---------- Dark mode (first-class theme, works with every style) ----------
    The `dark` class lives on <html> (see lib/theme.ts). Shared component
-   classes get dark surfaces here; the most-used Tailwind ink/white
-   utilities are remapped so the existing light design needs no rewrite.
-   Light mode is untouched. */
+   classes get dark surfaces here from the semantic theme variables, so
+   every style gets a matching dark mode. The ink/brand/accent utility
+   remaps below make existing light-mode classes read in dark. */
 .dark body {
-  background-color: #131022;
+  background-color: var(--page-bg);
   background-image:
-    radial-gradient(60rem 30rem at 85% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
-    radial-gradient(50rem 26rem at -10% 0%, rgba(245, 158, 11, 0.10), transparent 55%);
-  color: #eceaf6;
+    radial-gradient(60rem 30rem at 85% -10%, rgb(var(--brand-500) / 0.18), transparent 60%),
+    radial-gradient(50rem 26rem at -10% 0%, rgb(var(--accent-500) / 0.10), transparent 55%);
+  color: var(--text);
 }
 .dark .card {
-  background-color: #221f3d;
-  border-color: #3b3852;
+  background-color: var(--surface);
+  border-color: var(--border);
 }
 .dark .input {
-  background-color: #1c1933;
-  border-color: #3b3852;
-  color: #eceaf6;
+  background-color: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
 }
 .dark .input::placeholder {
-  color: #8f88b5;
+  color: var(--muted);
 }
 .dark .chip {
-  background-color: #312e81;
-  color: #c7d2fe;
+  background-color: var(--tint-brand);
+  color: var(--tint-brand-text);
 }
 .dark .chip-amber {
-  background-color: #451a03;
-  color: #fde68a;
+  background-color: var(--tint-accent);
+  color: var(--tint-accent-text);
 }
 .dark .option-btn {
-  background-color: #221f3d;
-  border-color: #3b3852;
-  color: #eceaf6;
+  background-color: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
 }
 .dark .option-correct {
   background-color: #064e3b;
@@ -304,13 +469,13 @@ body {
   color: #ffe4e6;
 }
 .dark .option-dimmed {
-  background-color: #1c1933;
-  border-color: #2e2a4d;
-  color: #6b688f;
+  background-color: var(--surface-2);
+  border-color: var(--border);
+  color: var(--muted);
 }
 .dark .feedback-neutral {
-  background-color: #221f3d;
-  color: #d9d6ec;
+  background-color: var(--surface);
+  color: var(--text-dim);
 }
 .dark .feedback-correct {
   background-color: #064e3b;
@@ -321,63 +486,71 @@ body {
   color: #ffe4e6;
 }
 .dark .progress-track {
-  background-color: #2e2a4d;
+  background-color: var(--surface-3);
 }
 .dark .btn-secondary {
-  background-color: #221f3d;
-  border-color: #3b3852;
-  color: #eceaf6;
+  background-color: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.dark .btn-secondary:hover {
+  border-color: rgb(var(--brand-400));
 }
 .dark .btn-ghost {
-  color: #b9b3d6;
+  color: var(--muted-strong);
 }
 .dark .markdown {
-  color: #d9d6ec;
+  color: var(--text-dim);
 }
 .dark .markdown h1,
 .dark .markdown h2,
 .dark .markdown h3,
 .dark .markdown strong {
-  color: #f6f6fb;
+  color: var(--text-strong);
 }
 .dark .markdown code {
-  background-color: #312e81;
-  color: #c7d2fe;
+  background-color: var(--tint-brand);
+  color: var(--tint-brand-text);
 }
 .dark .markdown blockquote {
-  background-color: #451a03;
-  color: #fde68a;
+  background-color: var(--tint-accent);
+  color: var(--tint-accent-text);
 }
 .dark .markdown th {
-  background-color: #312e81;
-  color: #f6f6fb;
+  background-color: var(--tint-brand);
+  color: var(--text-strong);
 }
 .dark .markdown th,
 .dark .markdown td {
-  border-color: #3b3852;
+  border-color: var(--border);
 }
 .dark .hero-glow {
   background:
-    radial-gradient(36rem 18rem at 50% -4rem, rgba(99, 102, 241, 0.28), transparent 65%),
-    radial-gradient(24rem 12rem at 88% 0%, rgba(245, 158, 11, 0.20), transparent 60%);
+    radial-gradient(36rem 18rem at 50% -4rem, rgb(var(--brand-500) / 0.28), transparent 65%),
+    radial-gradient(24rem 12rem at 88% 0%, rgb(var(--accent-500) / 0.20), transparent 60%);
 }
 /* Remap the ink text scale + white surfaces so existing markup reads in dark. */
-.dark .text-ink-900 { color: #f6f6fb; }
-.dark .text-ink-800 { color: #eceaf6; }
-.dark .text-ink-700 { color: #d9d6ec; }
-.dark .text-ink-600 { color: #b9b3d6; }
-.dark .text-ink-500 { color: #b9b3d6; }
-.dark .text-ink-400 { color: #8f88b5; }
-.dark .bg-white { background-color: #221f3d; }
-.dark .bg-ink-100 { background-color: #2e2a4d; }
-.dark .bg-ink-50 { background-color: #1c1933; }
-.dark .border-ink-100 { border-color: #3b3852; }
-.dark .border-ink-200 { border-color: #514d73; }
-.dark .bg-brand-50 { background-color: #312e81; }
-.dark .bg-accent-50 { background-color: #451a03; }
+.dark .text-ink-900 { color: var(--text-strong); }
+.dark .text-ink-800 { color: var(--text); }
+.dark .text-ink-700 { color: var(--text-dim); }
+.dark .text-ink-600 { color: var(--muted-strong); }
+.dark .text-ink-500 { color: var(--muted-strong); }
+.dark .text-ink-400 { color: var(--muted); }
+.dark .bg-white { background-color: var(--surface); }
+.dark .bg-ink-100 { background-color: var(--surface-3); }
+.dark .bg-ink-50 { background-color: var(--surface-2); }
+.dark .border-ink-100 { border-color: var(--border); }
+.dark .border-ink-200 { border-color: var(--border-strong); }
+.dark .bg-brand-50 { background-color: var(--tint-brand); }
+.dark .bg-brand-50\/50 { background-color: rgb(var(--brand-500) / 0.12); }
+.dark .bg-accent-50 { background-color: var(--tint-accent); }
+.dark .text-brand-700 { color: var(--tint-brand-text); }
+.dark .text-brand-600 { color: rgb(var(--brand-400)); }
+.dark .text-accent-700 { color: var(--tint-accent-text); }
+.dark .border-brand-300 { border-color: rgb(var(--brand-400)); }
 .dark ::-webkit-scrollbar-thumb {
-  background: #3b3852;
-  border-color: #1c1933;
+  background: var(--border-strong);
+  border-color: var(--surface-2);
 }
 
 /* ---------- Focus reading mode (Readwise pattern) ---------- */
@@ -394,14 +567,9 @@ body {
 }
 .focus-mode mark,
 .focus-mode .focus-highlight {
-  background: #fbda83;
-  color: #451a03;
+  background: var(--focus-hl-bg);
+  color: var(--focus-hl-text);
   border-radius: 0.25rem;
   padding: 0 0.2em;
-}
-.dark .focus-mode mark,
-.dark .focus-mode .focus-highlight {
-  background: #b45309;
-  color: #fef3c7;
 }
 

@@ -63,7 +63,7 @@ export function MasterySummary({ records }: { records: GuideErrorRecord[] }) {
             cy="32"
             r={r}
             fill="none"
-            stroke="#10b981"
+            style={{ stroke: MASTERY_META.Mastered.ring }}
             strokeWidth="6"
             strokeLinecap="round"
             strokeDasharray={circumference}

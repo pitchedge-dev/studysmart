@@ -21,11 +21,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Apply the saved theme before first paint — no light flash.
-            Same key as lib/theme.ts (studysmart-theme). */}
+        {/* Apply the saved style + dark mode before first paint — no flash.
+            Style key: lib/style.ts (studysmart-style, one of 5 ids).
+            Dark key: lib/theme.ts (studysmart-theme, "dark" or unset). */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(window.localStorage.getItem("studysmart-theme")==="dark"){document.documentElement.classList.add("dark")}}catch(e){}`,
+            __html: `try{var s=window.localStorage.getItem("studysmart-style");if(["indigo","midnight","forest","sunset","ocean"].indexOf(s)===-1){s="indigo"}document.documentElement.setAttribute("data-style",s);if(window.localStorage.getItem("studysmart-theme")==="dark"){document.documentElement.classList.add("dark")}}catch(e){}`,
           }}
         />
       </head>

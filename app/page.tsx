@@ -49,6 +49,13 @@ import {
 import { useActivity } from "@/lib/activity";
 import { dueCount as dueCountOf, loadAllErrors } from "@/lib/review";
 import { getTheme, toggleTheme } from "@/lib/theme";
+import {
+  applyStyle,
+  getStyle,
+  loadStyleFromProfile,
+  type StyleId,
+} from "@/lib/style";
+import ThemePicker from "@/components/ThemePicker";
 import StreakWidget from "@/components/StreakWidget";
 import CommandPalette, { type PaletteAction } from "@/components/CommandPalette";
 import ReviewQueue from "@/components/ReviewQueue";
@@ -211,6 +218,26 @@ export default function Home() {
   function toggleDark() {
     setDarkMode(toggleTheme() === "dark");
   }
+
+  // Site style follows the saved preference (lib/style.ts). When signed
+  // in, the profile's saved style wins so the look follows the user.
+  const [style, setStyle] = useState<StyleId>("indigo");
+  useEffect(() => {
+    setStyle(getStyle());
+  }, []);
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    loadStyleFromProfile(user.id).then((saved) => {
+      if (!cancelled && saved && saved !== getStyle()) {
+        applyStyle(saved, user.id);
+        setStyle(saved);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Celebrate a streak milestone (3/7/14/30 days) once, when crossed.
   useEffect(() => {
@@ -385,6 +412,13 @@ export default function Home() {
       label: darkMode ? "Switch to light mode" : "Switch to dark mode",
       group: "Appearance",
       run: toggleDark,
+    },
+    {
+      id: "change-style",
+      label: "Change site style",
+      group: "Appearance",
+      run: () =>
+        window.dispatchEvent(new Event("studysmart:open-style-picker")),
     },
     { id: "open-tutor", label: "Open AI tutor", group: "Actions", run: () => setTutorOpen(true) },
   ];
@@ -949,6 +983,11 @@ export default function Home() {
               />
             </div>
             <CommandPalette actions={paletteActions} shortcuts={SHORTCUTS} />
+            <ThemePicker
+              style={style}
+              onStyleChange={setStyle}
+              userId={user?.id ?? null}
+            />
             <button
               type="button"
               onClick={toggleDark}
@@ -2270,6 +2309,8 @@ export default function Home() {
         user={user}
         profile={profile}
         onAuthChanged={refreshAuth}
+        style={style}
+        onStyleChange={setStyle}
       />
 
       {showBackToTop && (

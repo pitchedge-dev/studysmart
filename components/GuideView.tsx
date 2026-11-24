@@ -396,7 +396,7 @@ export default function GuideView({
           <span className="relative inline-flex h-12 w-12 shrink-0 items-center justify-center">
             <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden>
               <circle cx="24" cy="24" r="19" fill="none" strokeWidth="5" className="stroke-ink-100 dark:stroke-ink-700" />
-              <circle cx="24" cy="24" r="19" fill="none" stroke="#6366f1" strokeWidth="5" strokeLinecap="round" strokeDasharray={2 * Math.PI * 19} strokeDashoffset={2 * Math.PI * 19 * (1 - scrollProgress / 100)} transform="rotate(-90 24 24)" />
+              <circle cx="24" cy="24" r="19" fill="none" style={{ stroke: "rgb(var(--brand-500))" }} strokeWidth="5" strokeLinecap="round" strokeDasharray={2 * Math.PI * 19} strokeDashoffset={2 * Math.PI * 19 * (1 - scrollProgress / 100)} transform="rotate(-90 24 24)" />
             </svg>
             <span className="absolute text-[10px] font-extrabold text-ink-900">
               {Math.round(scrollProgress)}%
