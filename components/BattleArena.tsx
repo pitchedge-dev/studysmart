@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -24,6 +24,19 @@ import {
 } from "lucide-react";
 import TutorPanel from "./TutorPanel";
 import { playArenaSound } from "@/lib/arenaSound";
+import {
+  fetchArenaBoard,
+  fetchArenaTitles,
+  fetchMyBest,
+  fetchOverallBoard,
+  fetchRank,
+  getLocalBestForArena,
+  getLocalBests,
+  recordArenaScore,
+  recordLocalResult,
+  type LeaderboardEntry,
+  type LocalArenaResult,
+} from "@/lib/arenaScores";
 import {
   getMyProfile,
   saveGuideToAccount,
@@ -199,6 +212,32 @@ export default function BattleArena({
     }>
   >([]);
 
+  // Leaderboards: the shared boards live in Supabase (arena_scores); the
+  // device-local list lives in localStorage for signed-out play and local
+  // guest players. Nothing here ever invents a score.
+  const [placement, setPlacement] = useState<{
+    rank: number;
+    gameTitle: string;
+  } | null>(null);
+  const [placementBusy, setPlacementBusy] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [boardTab, setBoardTab] = useState<"overall" | "arena">("overall");
+  const [boardEntries, setBoardEntries] = useState<LeaderboardEntry[]>([]);
+  const [boardLoading, setBoardLoading] = useState(false);
+  const [boardNote, setBoardNote] = useState<string | null>(null);
+  const [boardTableMissing, setBoardTableMissing] = useState(false);
+  const [arenaTitles, setArenaTitles] = useState<string[]>([]);
+  const [boardGameTitle, setBoardGameTitle] = useState<string | null>(null);
+  const [myBoardRank, setMyBoardRank] = useState<number | null>(null);
+  const [myBoardBest, setMyBoardBest] = useState<LeaderboardEntry | null>(
+    null
+  );
+  const [localBests, setLocalBests] = useState<LocalArenaResult[]>([]);
+  // One play-through = one leaderboard row at most, even if the finish
+  // path is somehow reached twice.
+  const playIdRef = useRef(0);
+  const recordedPlayRef = useRef(-1);
+
   // Flashcards state
   const [cardIndex, setCardIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -252,8 +291,16 @@ export default function BattleArena({
     }
   }, [muted]);
 
+  // Device-local results (signed-out play, local guest players).
+  useEffect(() => {
+    setLocalBests(getLocalBests());
+  }, []);
+
   // Reset everything about a play-through (scores, lives, streaks, stats).
   function resetPlayState(playerN: number) {
+    playIdRef.current += 1;
+    setPlacement(null);
+    setPlacementBusy(false);
     setCurrent(0);
     setScores(Array(playerN).fill(0));
     setTurn(0);
@@ -387,6 +434,74 @@ export default function BattleArena({
     setGame(null);
     setFinished(false);
     setError(null);
+  }
+
+  // Open a leaderboard: overall (every player's best, all-time) or one
+  // arena's board. Loads on demand; a failed refresh never clears the
+  // board we already have — it just adds a quiet note.
+  async function openBoard(
+    tab: "overall" | "arena",
+    gameTitle?: string | null
+  ) {
+    const title = gameTitle ?? boardGameTitle ?? game?.title ?? null;
+    setBoardOpen(true);
+    setBoardTab(tab);
+    if (title) setBoardGameTitle(title);
+    setBoardLoading(true);
+    setBoardNote(null);
+    setBoardTableMissing(false);
+    try {
+      const titles = await fetchArenaTitles();
+      setArenaTitles(titles.titles);
+      if (titles.tableMissing) setBoardTableMissing(true);
+      if (tab === "overall") {
+        const res = await fetchOverallBoard(10, user?.id ?? null);
+        setBoardEntries(res.entries);
+        if (res.tableMissing) setBoardTableMissing(true);
+        if (user) {
+          const mine = await fetchMyBest(user.id, null);
+          setMyBoardBest(mine);
+          setMyBoardRank(
+            mine
+              ? await fetchRank({ gameTitle: null, score: mine.score })
+              : null
+          );
+        } else {
+          setMyBoardBest(null);
+          setMyBoardRank(null);
+        }
+      } else {
+        const t = title ?? titles.titles[0] ?? null;
+        if (!t) {
+          setBoardEntries([]);
+          setMyBoardBest(null);
+          setMyBoardRank(null);
+          return;
+        }
+        setBoardGameTitle(t);
+        const res = await fetchArenaBoard(t, 10, user?.id ?? null);
+        setBoardEntries(res.entries);
+        if (res.tableMissing) setBoardTableMissing(true);
+        if (user) {
+          const mine = await fetchMyBest(user.id, t);
+          setMyBoardBest(mine);
+          setMyBoardRank(
+            mine
+              ? await fetchRank({ gameTitle: t, score: mine.score })
+              : null
+          );
+        } else {
+          setMyBoardBest(null);
+          setMyBoardRank(null);
+        }
+      }
+    } catch {
+      setBoardNote(
+        "Couldn't refresh the leaderboard — showing the last board we have."
+      );
+    } finally {
+      setBoardLoading(false);
+    }
   }
 
   // Timer for timed games (trivia mode only): counts down once per second.
@@ -538,6 +653,78 @@ export default function BattleArena({
         playerStats.reduce((n, s) => n + s.correct, 0),
         playerStats.reduce((n, s) => n + s.answered, 0)
       );
+      // Leaderboard: Player 1 is the signed-in account holder (in 1 Player,
+      // the only player). Record once per play-through, in the background —
+      // a failed save never blocks the results screen.
+      const myStats = playerStats[0] ?? {
+        correct: 0,
+        answered: 0,
+        bestStreak: 0,
+        bonus: 0,
+      };
+      const myScore = scores[0] ?? 0;
+      const title = (game.title || "Battle Arena").slice(0, 200);
+      const topic = (templatesSource || guideTopic || "").slice(0, 500);
+      if (
+        myStats.answered > 0 &&
+        game.questions.length > 0 &&
+        recordedPlayRef.current !== playIdRef.current
+      ) {
+        recordedPlayRef.current = playIdRef.current;
+        const accuracy = myStats.correct / myStats.answered;
+        if (user) {
+          setPlacementBusy(true);
+          void recordArenaScore({
+            user,
+            gameTitle: title,
+            gameType: game.gameType,
+            topic: topic || null,
+            mode,
+            score: myScore,
+            accuracy,
+            bestStreak: myStats.bestStreak,
+            correct: myStats.correct,
+            answered: myStats.answered,
+            questionCount: game.questions.length,
+          }).then(async (saved) => {
+            if (!saved) {
+              setPlacementBusy(false);
+              return;
+            }
+            const rank = await fetchRank({
+              gameTitle: title,
+              score: myScore,
+              excludeUserId: user.id,
+            });
+            if (rank !== null) setPlacement({ rank, gameTitle: title });
+            setPlacementBusy(false);
+          });
+        } else {
+          // Signed out: the best score stays on this device only.
+          recordLocalResult({
+            gameTitle: title,
+            label: "You",
+            score: myScore,
+            accuracy,
+          });
+          setLocalBests(getLocalBests());
+        }
+        // 2-player / multiplayer: the other local players' scores stay on
+        // this device only — a guest name must never appear on the shared
+        // board.
+        if (playerCount > 1) {
+          playerStats.forEach((s, i) => {
+            if (i === 0 || s.answered === 0) return;
+            recordLocalResult({
+              gameTitle: title,
+              label: `Player ${i + 1}`,
+              score: scores[i] ?? 0,
+              accuracy: s.correct / s.answered,
+            });
+          });
+          setLocalBests(getLocalBests());
+        }
+      }
     } else {
       setCurrent(current + 1);
       setSelected(null);
@@ -595,6 +782,11 @@ export default function BattleArena({
     }))
     .sort((a, b) => b.score - a.score);
   const showConfetti = finished && (rankedPlayers[0]?.accuracy ?? 0) >= 0.7;
+  // Signed-out player's best on this device for the arena being viewed.
+  const signedOutArenaBest =
+    !user && boardTab === "arena" && boardGameTitle
+      ? getLocalBestForArena(boardGameTitle)
+      : null;
 
   return (
     <div className="card p-5 sm:p-6">
@@ -703,6 +895,21 @@ export default function BattleArena({
               Standard is 20 questions. Marathon builds in two parts and can
               take a little longer.
             </p>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openBoard("overall")}
+              className="btn-secondary"
+            >
+              <Trophy className="h-4 w-4" /> Leaderboards
+            </button>
+            {!user && (
+              <p className="text-xs text-ink-400">
+                Sign in to put your scores on the shared board — you can
+                still play and see the boards.
+              </p>
+            )}
           </div>
           {(error || templatesError) && (
             <div className="feedback-wrong mt-3 font-medium">
@@ -1225,9 +1432,42 @@ export default function BattleArena({
               </div>
             ))}
           </div>
+          {placementBusy && (
+            <p className="mt-3 text-sm font-medium text-ink-400">
+              Saving your score to the leaderboard…
+            </p>
+          )}
+          {placement && (
+            <p className="mt-3">
+              <span className="chip-amber">
+                <Trophy className="h-3.5 w-3.5" /> You placed #
+                {placement.rank} on the {placement.gameTitle} board!
+              </span>
+            </p>
+          )}
+          {!user && !placementBusy && (
+            <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-ink-400">
+              Sign in to put your scores on the shared leaderboard — for now
+              your best score is saved on this device only.
+            </p>
+          )}
+          {user && playerCount > 1 && (
+            <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-ink-400">
+              Only Player 1&apos;s score goes on the shared board
+              (that&apos;s you, the signed-in player) — the other
+              players&apos; scores stay on this device.
+            </p>
+          )}
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             <button type="button" onClick={replayGame} className="btn-primary">
               <RotateCcw className="h-4 w-4" /> Replay this game
+            </button>
+            <button
+              type="button"
+              onClick={() => openBoard("arena", game.title)}
+              className="btn-secondary"
+            >
+              <Trophy className="h-4 w-4" /> View leaderboard
             </button>
             {misses.length > 0 && onReviewMisses && (
               <button
@@ -1265,6 +1505,159 @@ export default function BattleArena({
           >
             <RotateCcw className="h-4 w-4" /> New Game
           </button>
+        </div>
+      )}
+
+      {boardOpen && (
+        <div className="mt-4 rounded-2xl border border-ink-100 bg-white p-5 shadow-card">
+          <div className="flex items-center gap-2">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-accent-400 to-accent-600 text-white shadow-glow">
+              <Trophy className="h-5 w-5" />
+            </span>
+            <div>
+              <h3 className="text-lg font-extrabold tracking-tight">
+                Leaderboards
+              </h3>
+              <p className="text-sm text-ink-400">
+                Real scores from real finished games — nothing here is made
+                up.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBoardOpen(false)}
+              className="btn-ghost ml-auto"
+              aria-label="Close leaderboards"
+            >
+              <XCircle className="h-4 w-4" />
+              <span className="hidden sm:inline">Close</span>
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {(["overall", "arena"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => openBoard(t)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ${
+                  boardTab === t
+                    ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
+                    : "bg-ink-100 text-ink-700 hover:bg-ink-200"
+                }`}
+              >
+                {t === "overall" ? "Overall" : "By arena"}
+              </button>
+            ))}
+            {boardTab === "arena" && arenaTitles.length > 0 && (
+              <select
+                value={boardGameTitle ?? ""}
+                onChange={(e) => openBoard("arena", e.target.value)}
+                className="input w-auto"
+                aria-label="Choose an arena"
+              >
+                {arenaTitles.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {boardTableMissing && (
+            <p className="feedback-neutral mt-3">
+              Leaderboards need a quick database update before scores can
+              appear — your games still save locally.
+            </p>
+          )}
+          {boardNote && (
+            <p className="feedback-neutral mt-3">{boardNote}</p>
+          )}
+
+          {boardLoading ? (
+            <p className="mt-4 flex items-center gap-2 text-sm text-ink-400">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading the
+              board…
+            </p>
+          ) : boardEntries.length === 0 ? (
+            <p className="mt-4 text-sm font-medium text-ink-400">
+              No scores yet — finish a game to be the first on the board!
+            </p>
+          ) : (
+            <ol className="mt-4 space-y-2">
+              {boardEntries.map((row) => (
+                <li
+                  key={`${row.userId}-${row.playedAt}`}
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+                    row.isMe
+                      ? "border-amber-300 bg-amber-50"
+                      : "border-ink-100 bg-white"
+                  }`}
+                >
+                  <span className="w-8 shrink-0 text-center font-extrabold">
+                    #{row.rank}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-bold">
+                      {row.displayName}
+                      {row.isMe ? " (you)" : ""}
+                    </span>
+                    <span className="block truncate text-xs text-ink-400">
+                      @{row.username} · {Math.round(row.accuracy * 100)}%
+                      accuracy · best streak {row.bestStreak}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-extrabold">
+                    {row.score} pts
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {user && myBoardBest && myBoardRank !== null && (
+            <p className="mt-3 text-sm font-semibold">
+              You are #{myBoardRank} — your best: {myBoardBest.score} pts (
+              {Math.round(myBoardBest.accuracy * 100)}% accuracy)
+            </p>
+          )}
+          {user && !myBoardBest && !boardLoading && !boardTableMissing && (
+            <p className="mt-3 text-sm text-ink-400">
+              You haven&apos;t played a ranked game yet — finish one to get
+              on the board.
+            </p>
+          )}
+          {signedOutArenaBest && (
+            <p className="mt-3 text-sm font-semibold">
+              Your best on this device for {boardGameTitle}:{" "}
+              {signedOutArenaBest.score} pts (
+              {Math.round(signedOutArenaBest.accuracy * 100)}% accuracy)
+            </p>
+          )}
+
+          {localBests.length > 0 && (
+            <div className="mt-4 border-t border-ink-100 pt-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-ink-400">
+                On this device only — not on the shared board
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {localBests.slice(0, 5).map((r, i) => (
+                  <li
+                    key={`${r.gameTitle}-${r.playedAt}-${i}`}
+                    className="flex items-center justify-between gap-2 text-sm"
+                  >
+                    <span className="truncate">
+                      {r.label} · {r.gameTitle}
+                    </span>
+                    <span className="shrink-0 font-bold">
+                      {r.score} pts · {Math.round(r.accuracy * 100)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
