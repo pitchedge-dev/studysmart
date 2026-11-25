@@ -9,6 +9,7 @@ import {
   OVERLOADED_MESSAGE,
   safeErrorDetail,
 } from "@/lib/gemini";
+import { cleanQuestions, repairQuestion } from "@/lib/arenaQuestions";
 
 export const maxDuration = 60;
 
@@ -261,7 +262,17 @@ export async function POST(req: NextRequest) {
             abortSignal: AbortSignal.timeout(10000),
           });
 
-          return NextResponse.json({ templates: object.templates });
+          // Template previews are only a taste, but their highlighted
+          // correct answer still has to be one of the options — repair
+          // any sample whose stored answer is a paraphrase (local text
+          // check, no extra AI call); drop one that cannot be trusted.
+          const templates = object.templates.map((t) => ({
+            ...t,
+            sampleQuestions: (t.sampleQuestions ?? [])
+              .map((q) => repairQuestion(q))
+              .filter((q): q is NonNullable<typeof q> => q !== null),
+          }));
+          return NextResponse.json({ templates });
         } catch (err) {
           lastErr = err;
           console.error("[/api/generate-game templates] attempt failed:", err);
@@ -348,17 +359,32 @@ export async function POST(req: NextRequest) {
 
     let merged: z.infer<typeof GameSchema> | null = null;
     let lastErr: unknown = null;
+    // Questions already accepted into this game, by normalized text —
+    // shared across batches so a question repeated in a later batch is
+    // dropped too. Every batch is cleaned (duplicates dropped, broken
+    // correct answers repaired or dropped) before it is merged, and a
+    // batch that lost questions asks for replacements in the next one,
+    // so the game still reaches the requested count.
+    const acceptedQuestions = new Set<string>();
+    const cleanBatch = (
+      questions: z.infer<typeof GameQuestionSchema>[]
+    ) => cleanQuestions(questions, acceptedQuestions);
     try {
       for (let c = 0; c < chunkCount; c++) {
-        const start = c * CHUNK;
-        const wanted = Math.min(CHUNK, count - start);
+        const have = merged ? merged.questions.length : 0;
+        // Bring the total up to this batch's planned slice (or the full
+        // count on the last batch), including replacements for any
+        // questions dropped from earlier batches.
+        const planned = Math.min(count, (c + 1) * CHUNK);
+        const wanted = Math.max(0, planned - have);
+        if (wanted === 0) continue;
         const prior = merged ? merged.questions.map((q) => q.question) : [];
         const system =
           chunkCount === 1
-            ? `${baseSystem} Generate exactly ${count} questions for ${players} player(s).`
+            ? `${baseSystem} Generate exactly ${wanted} questions for ${players} player(s).`
             : c === 0
               ? `${baseSystem} This is PART 1 of ${chunkCount} of one game — generate exactly ${wanted} questions (questions 1–${wanted} of ${count}) for ${players} player(s).`
-              : `${baseSystem} This is PART ${c + 1} of ${chunkCount} of the SAME game you started in part 1 — keep the same title, game type, and style. Generate exactly ${wanted} NEW questions (questions ${start + 1}–${start + wanted} of ${count}) for ${players} player(s). Do not repeat or rephrase any of these earlier questions from this same game:\n${prior
+              : `${baseSystem} This is PART ${c + 1} of ${chunkCount} of the SAME game you started in part 1 — keep the same title, game type, and style. Generate exactly ${wanted} NEW questions for ${players} player(s). The full game needs ${count} questions; ${have} have been written so far. Do not repeat or rephrase any of these earlier questions from this same game:\n${prior
                   .map((q, i) => `${i + 1}. ${q}`)
                   .join("\n")}\nDo not include cards — part 1 already has them.`;
         const part = await runBatch(
@@ -366,10 +392,43 @@ export async function POST(req: NextRequest) {
           basePrompt,
           chunkCount === 1 ? 20000 : 15000
         );
+        const cleaned = cleanBatch(part.questions);
         if (!merged) {
-          merged = part;
+          merged = { ...part, questions: cleaned };
         } else {
-          merged.questions = [...merged.questions, ...part.questions];
+          merged.questions = [...merged.questions, ...cleaned];
+        }
+      }
+
+      // Still short after the planned batches (duplicates or broken
+      // questions were dropped, or a batch came back short)? Top up
+      // with at most two extra batches, each asking for exactly the
+      // missing questions — same batch mechanism, no separate pass. If
+      // a top-up fails, serve the shorter game rather than failing the
+      // whole build.
+      let topUps = 0;
+      while (
+        merged &&
+        merged.questions.length < count &&
+        topUps < 2
+      ) {
+        topUps += 1;
+        const missing = count - merged.questions.length;
+        const prior = merged.questions.map((q) => q.question);
+        try {
+          const part = await runBatch(
+            `${baseSystem} This is a TOP-UP for the SAME game you started — keep the same title, game type, and style. Generate exactly ${missing} NEW questions for ${players} player(s). The full game needs ${count} questions; ${merged.questions.length} are done. Do not repeat or rephrase any of these earlier questions from this same game:\n${prior
+              .map((q, i) => `${i + 1}. ${q}`)
+              .join("\n")}\nDo not include cards — part 1 already has them.`,
+            basePrompt,
+            15000
+          );
+          const cleaned = cleanBatch(part.questions);
+          if (cleaned.length === 0) break;
+          merged.questions = [...merged.questions, ...cleaned];
+        } catch (err) {
+          console.error("[/api/generate-game top-up] attempt failed:", err);
+          break;
         }
       }
     } catch (err) {
@@ -393,7 +452,10 @@ export async function POST(req: NextRequest) {
       gameDescription: object.gameDescription,
       timedSecondsPerQuestion: object.timedSecondsPerQuestion,
       cards: object.cards ?? [],
-      questions: object.questions,
+      // Cleaned at every batch, so no duplicates and no unanswerable
+      // questions; sliced to the requested count in case a batch
+      // over-delivered.
+      questions: object.questions.slice(0, count),
     });
   } catch (err) {
     console.error("[/api/generate-game] error:", err);

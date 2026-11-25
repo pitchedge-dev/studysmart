@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import TutorPanel from "./TutorPanel";
 import { playArenaSound } from "@/lib/arenaSound";
+import { dedupeQuestions, sameAnswer } from "@/lib/arenaQuestions";
 import {
   readPendingArenaExport,
   lengthForStudyHours,
@@ -151,6 +152,16 @@ const CONFETTI_COLORS = [
   "rgb(var(--brand-400))",
   "rgb(var(--accent-400))",
 ];
+
+/** A game loaded from anywhere (fresh build, Your Study Guides,
+ *  Browse) is cleaned before play: duplicate questions are dropped
+ *  (keep the first) and any question whose stored correct answer does
+ *  not match its options is repaired from its own explanation — or
+ *  dropped if it cannot be trusted. A duplicate can never be shown
+ *  twice in one game, even if the stored data contains one. */
+function cleanGame(g: GameData): GameData {
+  return { ...g, questions: dedupeQuestions(g.questions) };
+}
 
 export default function BattleArena({
   guideTopic,
@@ -386,8 +397,9 @@ export default function BattleArena({
       }
       return;
     }
-    setGame(g);
-    setPlayMode(g.questions.length > 0 ? "trivia" : "flashcards");
+    const clean = cleanGame(g);
+    setGame(clean);
+    setPlayMode(clean.questions.length > 0 ? "trivia" : "flashcards");
     resetPlayState(playerCount);
     setTimeLeft(g.timedSecondsPerQuestion ?? null);
     setTemplates(null);
@@ -616,7 +628,7 @@ export default function BattleArena({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate the game.");
-      const g = data as GameData;
+      const g = cleanGame(data as GameData);
       setGame(g);
       setPlayMode(g.questions.length > 0 ? "trivia" : "flashcards");
       resetPlayState(playerCount);
@@ -748,15 +760,22 @@ export default function BattleArena({
   }
 
   // Timer for timed games (trivia mode only): counts down once per second.
+  // It runs ONLY while the current question is actually on screen and
+  // answerable — never while the game is still building/saving (the
+  // "Building your game" wait after picking a template, when the game
+  // is already set but the player is still watching the spinner), never
+  // after the player has answered, and it restarts fresh for every
+  // question. Before this fix the interval started on game load, so the
+  // first question could time out before the player could answer it.
   useEffect(() => {
-    if (!game || playMode !== "trivia" || !timedSeconds || selected || finished) return;
+    if (!game || playMode !== "trivia" || !timedSeconds || selected || finished || loading) return;
     setTimeLeft(timedSeconds);
     const id = setInterval(() => {
       setTimeLeft((prev) => (prev === null ? prev : Math.max(0, prev - 1)));
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game, playMode, current, finished]);
+  }, [game, playMode, current, finished, loading, selected]);
 
   // Time ran out on this question: counts as a miss — streak lost, a life lost.
   useEffect(() => {
@@ -822,7 +841,11 @@ export default function BattleArena({
     if (selected || !game) return;
     const q = game.questions[current];
     setSelected(option);
-    if (option === q.correctAnswer) {
+    // Normalized comparison: the stored correct answer and the option
+    // the player tapped can differ in case/punctuation/whitespace
+    // (and older saved games were never repaired), so an exact string
+    // match would mark a right answer wrong.
+    if (sameAnswer(option, q.correctAnswer)) {
       onAnswer?.(true);
       // Points scale with speed (up to +50% of the base for a fast answer)
       // and streaks pay a combo bonus: 3 in a row = +25, 4 = +50, and so on.
@@ -1429,12 +1452,12 @@ export default function BattleArena({
                             <li
                               key={opt}
                               className={`flex items-center gap-1.5 text-sm ${
-                                opt === q.correctAnswer
+                                sameAnswer(opt, q.correctAnswer)
                                   ? "font-semibold text-emerald-700"
                                   : "text-ink-400"
                               }`}
                             >
-                              {opt === q.correctAnswer && (
+                              {sameAnswer(opt, q.correctAnswer) && (
                                 <CheckCircle2 className="h-4 w-4 shrink-0" />
                               )}
                               <span>{opt}</span>
@@ -1631,7 +1654,7 @@ export default function BattleArena({
               </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {question.options.map((opt) => {
-                  const isCorrect = opt === question.correctAnswer;
+                  const isCorrect = sameAnswer(opt, question.correctAnswer);
                   const isPicked = opt === selected;
                   let cls = "";
                   if (selected) {
@@ -1672,7 +1695,7 @@ export default function BattleArena({
                     <p className="mt-1.5 text-xs font-medium text-ink-400">
                       A life is lost — answer faster next time!
                     </p>
-                  ) : selected === question.correctAnswer && lastAward ? (
+                  ) : sameAnswer(selected, question.correctAnswer) && lastAward ? (
                     <p className="mt-1.5 text-xs font-medium text-ink-400">
                       +{lastAward.base} base
                       {lastAward.speed > 0
@@ -1699,7 +1722,7 @@ export default function BattleArena({
                         ? "See Results"
                         : "Next Question"}
                     </button>
-                    {selected !== question.correctAnswer && selected !== "__timeout__" && (
+                    {selected !== "__timeout__" && !sameAnswer(selected, question.correctAnswer) && (
                       <button
                         type="button"
                         onClick={() => {

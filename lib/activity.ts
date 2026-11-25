@@ -58,7 +58,26 @@ export type ActivityState = {
   celebratedMilestones: number[];
 };
 
-const STORAGE_KEY = "studysmart-activity:v1";
+/**
+ * Storage keys are scoped per user: signed-out play uses the legacy
+ * key, and every signed-in account gets its own key. A brand-new
+ * account therefore starts at 0 streak / 0 XP instead of inheriting
+ * the previous account's counters from this device — that leak was
+ * the old behaviour, one shared key for everybody.
+ *
+ * NOTE: existing signed-in players' local history lives under the
+ * legacy key and is NOT copied over (it cannot be attributed to one
+ * account — that is exactly the leak). Their server-side days are
+ * restored by the Supabase merge below; only the local-only counters
+ * (arena wins, focus sessions) restart.
+ */
+const LEGACY_STORAGE_KEY = "studysmart-activity:v1";
+
+export function storageKeyFor(userId: string | null): string {
+  if (!userId) return LEGACY_STORAGE_KEY;
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "");
+  return `${LEGACY_STORAGE_KEY}:${safe}`;
+}
 
 export function todayKey(d = new Date()): string {
   const y = d.getFullYear();
@@ -88,9 +107,9 @@ export function emptyDay(date: string): ActivityDay {
   };
 }
 
-function loadLocal(): ActivityState {
+function loadLocal(key: string): ActivityState {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return { days: {}, lastGuide: null, celebratedMilestones: [] };
     const parsed = JSON.parse(raw) as Partial<ActivityState>;
     return {
@@ -103,9 +122,9 @@ function loadLocal(): ActivityState {
   }
 }
 
-function saveLocal(state: ActivityState): void {
+function saveLocal(state: ActivityState, key: string): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(key, JSON.stringify(state));
   } catch {
     // Storage unavailable — activity stays in memory for this session.
   }
@@ -220,7 +239,11 @@ export function recordActivityNow(
   opts?: { correct?: boolean; userId?: string | null }
 ): void {
   try {
-    const state = loadLocal();
+    // Scoped to the signed-in user (or the shared signed-out key) —
+    // a question answered on one account must never land in another
+    // account's streak/XP.
+    const storageKey = storageKeyFor(opts?.userId ?? null);
+    const state = loadLocal(storageKey);
     const key = todayKey();
     const day = { ...(state.days[key] ?? emptyDay(key)) };
     if (kind === "question") {
@@ -237,7 +260,7 @@ export function recordActivityNow(
       day.xp += XP_PER_MASTERY;
     }
     const next = { ...state, days: { ...state.days, [key]: day } };
-    saveLocal(next);
+    saveLocal(next, storageKey);
     void syncDayToSupabase(opts?.userId ?? null, day);
   } catch {
     // Activity recording must never break studying.
@@ -284,13 +307,21 @@ export function useActivity(userId: string | null): ActivityApi {
   stateRef.current = state;
   const userRef = useRef(userId);
   userRef.current = userId;
+  // The storage key for whoever is signed in right now. Refs (not
+  // state) so the callbacks below always write to the current user's
+  // key, even if the user changed between render and callback.
+  const keyRef = useRef(storageKeyFor(userId));
+  keyRef.current = storageKeyFor(userId);
 
-  // Load local state on mount; merge Supabase days when signed in.
+  // Load local state on mount AND whenever the signed-in user changes
+  // (sign-in, sign-out, account switch): each account sees only its
+  // own days, streak, XP, and "continue where you left off" entry. A
+  // brand-new account loads an empty state — 0 streak, 0 XP.
   useEffect(() => {
-    setState(loadLocal());
+    setState(loadLocal(keyRef.current));
     setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId || !loaded) return;
@@ -317,7 +348,7 @@ export function useActivity(userId: string | null): ActivityApi {
             : r;
         }
         const next = { ...prev, days };
-        saveLocal(next);
+        saveLocal(next, keyRef.current);
         return next;
       });
     });
@@ -335,7 +366,7 @@ export function useActivity(userId: string | null): ActivityApi {
           ...prev,
           days: { ...prev.days, [key]: day },
         };
-        saveLocal(next);
+        saveLocal(next, keyRef.current);
         void syncDayToSupabase(userRef.current, day);
         return next;
       });
@@ -367,7 +398,7 @@ export function useActivity(userId: string | null): ActivityApi {
           ...prev,
           lastGuide: { title, guideId: guideId ?? null, guideKey: guideKey ?? null, openedAt },
         };
-        saveLocal(next);
+        saveLocal(next, keyRef.current);
         return next;
       });
     },
@@ -414,7 +445,7 @@ export function useActivity(userId: string | null): ActivityApi {
   const saveLastGuide = useCallback((guide: LastGuide) => {
     setState((prev) => {
       const next = { ...prev, lastGuide: guide };
-      saveLocal(next);
+      saveLocal(next, keyRef.current);
       return next;
     });
   }, []);
@@ -429,7 +460,7 @@ export function useActivity(userId: string | null): ActivityApi {
     setState((prev) => {
       if (!prev.lastGuide) return prev;
       const next = { ...prev, lastGuide: null };
-      saveLocal(next);
+      saveLocal(next, keyRef.current);
       return next;
     });
   }, []);
@@ -463,7 +494,7 @@ export function useActivity(userId: string | null): ActivityApi {
         ...prev,
         celebratedMilestones: [...prev.celebratedMilestones, milestone],
       };
-      saveLocal(next);
+      saveLocal(next, keyRef.current);
       return next;
     });
   }, [milestone]);
