@@ -76,6 +76,10 @@ import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
 import GuideVideos from "@/components/GuideVideos";
 import GivenResources from "@/components/GivenResources";
+import {
+  writePendingArenaExport,
+  type ArenaExportSource,
+} from "@/lib/arenaExport";
 import type { GivenResource } from "@/lib/guideSchema";
 import PreTest from "@/components/PreTest";
 import ProgressDashboard from "@/components/ProgressDashboard";
@@ -297,6 +301,25 @@ export default function Home() {
       setCelebration(`🔥 ${activity.milestone}-day streak!`);
     }
   }, [activity.milestone]);
+
+  // Deep link from a standalone guide's "Turn into Battle Arena" button:
+  // /?arena=1 opens the Arena, which consumes the pending export and
+  // auto-generates the game templates from that guide.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("arena") === "1") {
+      params.delete("arena");
+      const rest = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + (rest ? `?${rest}` : "")
+      );
+      goToSection("arena");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // How many weak concepts are due for review (nav badge).
   useEffect(() => {
@@ -2572,6 +2595,11 @@ export default function Home() {
             onOpenGuide={openGuide}
             onOpenGuideDetail={openGuideDetail}
             onOpenGame={openGame}
+            onTurnGuideIntoArena={(source: ArenaExportSource) => {
+              writePendingArenaExport(source);
+              goToSection("arena");
+            }}
+            onViewInBrowse={() => goToSection("browse")}
             onGenerate={() => goToSection("generate")}
           />
         </section>

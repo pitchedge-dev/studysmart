@@ -866,11 +866,11 @@ export default function GuideView({
           </p>
           <p className="mt-1 text-sm leading-relaxed text-brand-700">
             The game ideas for &ldquo;{result.guideTitle ?? "this guide"}
-            &rdquo; are waiting — open Battle Arena from the home page and
-            they will appear automatically, built from this guide.
+            &rdquo; are waiting — open Battle Arena and they will appear
+            automatically, built from this guide.
           </p>
-          <Link href="/" className="btn-primary mt-3">
-            Back to StudySMART
+          <Link href="/?arena=1" className="btn-primary mt-3">
+            Open Battle Arena
           </Link>
         </div>
       )}
