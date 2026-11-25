@@ -37,7 +37,7 @@ it trivial or barely remembered it.
 answer; `components/ReviewQueue.tsx` adds an Anki-style self-grade
 (Hard / Good / Easy) after each correct review answer, so the next gap
 adapts to how hard it felt; migration
-`supabase/migrations/0008_sm2_ease.sql` adds `ease_factor` +
+`supabase/migrations/0009_sm2_ease.sql` adds `ease_factor` +
 `review_reps` to `guide_errors` (parent: apply live; the upsert already
 retries without the new columns if the migration is not applied yet,
 exactly like migration 0004). Old records default to ease 2.5 / 0

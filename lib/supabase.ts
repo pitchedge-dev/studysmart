@@ -570,7 +570,7 @@ export type GuideErrorRow = {
   /** Spaced-repetition schedule (migration 0004). Null until set. */
   next_review_at?: string | null;
   review_interval_days?: number | null;
-  /** SM-2 scheduler state (migration 0008). Null on old rows — the
+  /** SM-2 scheduler state (migration 0009). Null on old rows — the
    *  app falls back to the SM-2 defaults (ease 2.5, 0 reps). */
   ease_factor?: number | null;
   review_reps?: number | null;
@@ -647,7 +647,7 @@ export async function upsertGuideErrors(
     .upsert(rows, { onConflict: "user_id,guide_key,concept_title" });
   if (!error) return true;
   // The spaced-repetition columns come from migrations 0004 (schedule)
-  // and 0008 (SM-2 ease/reps), which may not be applied live yet. If the
+  // and 0009 (SM-2 ease/reps), which may not be applied live yet. If the
   // upsert failed because those columns do not exist, retry without
   // them — the errors still get saved.
   const missingColumn =

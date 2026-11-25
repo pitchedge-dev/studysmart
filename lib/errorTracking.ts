@@ -43,7 +43,7 @@ export type GuideErrorRecord = {
    *  a missing date means "due now". */
   nextReviewAt?: string;
   reviewIntervalDays?: number;
-  /** SM-2 scheduler state (migration 0008): easiness factor (starts
+  /** SM-2 scheduler state (migration 0009): easiness factor (starts
    *  2.5, floor 1.3) and consecutive-pass count. Missing on old records
    *  — they start at the SM-2 defaults, so nothing is lost. */
   easeFactor?: number;
