@@ -40,6 +40,8 @@ import ShowYourReasoning from "./ShowYourReasoning";
 import SectionCheckpoint from "./SectionCheckpoint";
 import GuideVideos from "./GuideVideos";
 import GuideNavBar, { type GuideNavSection } from "./GuideNavBar";
+import GivenResources from "./GivenResources";
+import type { GivenResource } from "@/lib/guideSchema";
 import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
 import MeetYourBots from "./MeetYourBots";
@@ -122,6 +124,35 @@ export default function GuideView({
 }) {
   const modules: StudyModule[] = result.modules ?? [];
   const quiz: QuizQuestion[] = result.quiz ?? [];
+
+  /** "Given resources" — the materials the teacher gave for this unit
+   *  (the files uploaded when the guide was made). Stored in the saved
+   *  guide JSON by /api/generate. Read defensively: page.tsx's
+   *  GenerateResult type does not carry the field yet, so a cast keeps
+   *  this compiling until that type is extended. */
+  const givenResources: GivenResource[] =
+    (result as unknown as { givenResources?: GivenResource[] })
+      .givenResources ?? [];
+
+  /** Fields Builder Bot must not lose when it saves a new version:
+   *  the study time (its schema does not carry the field) and the
+   *  given resources (in the guide schema, but the model may still
+   *  drop the field — re-attach the current list then, so the section
+   *  never vanishes after the first edit). */
+  function withPreservedFields(next: GenerateResult): GenerateResult {
+    const nextResources = (
+      next as unknown as { givenResources?: GivenResource[] }
+    ).givenResources;
+    return {
+      ...next,
+      studyHours: next.studyHours ?? result.studyHours,
+      ...(nextResources && nextResources.length > 0
+        ? { givenResources: nextResources }
+        : givenResources.length > 0
+          ? { givenResources }
+          : {}),
+    } as unknown as GenerateResult;
+  }
 
   const [collapsedModules, setCollapsedModules] = useState<Record<number, boolean>>({});
   const [activeSection, setActiveSection] = useState("overview");
@@ -359,6 +390,8 @@ export default function GuideView({
   // Table of contents: guide sections + modules + concepts + key terms.
   const toc: TocEntry[] = useMemo(() => {
     const entries: TocEntry[] = [{ id: "overview", label: "Overview", kind: "section" }];
+    if (givenResources.length > 0)
+      entries.push({ id: "given-resources", label: "Given resources", kind: "section" });
     if (result.objectives?.length)
       entries.push({ id: "objectives", label: "What you'll learn", kind: "section" });
     if (result.cheatSheet)
@@ -813,6 +846,12 @@ export default function GuideView({
               </div>
             )}
           </section>
+
+          {/* Given resources — the materials the teacher gave for this
+              unit. Only renders when the guide was made with uploads;
+              GivenResources returns null otherwise, so guides made
+              from typed notes never show the section. */}
+          <GivenResources resources={givenResources} />
 
           {/* Objectives */}
           {result.objectives && result.objectives.length > 0 && (
@@ -1310,15 +1349,10 @@ export default function GuideView({
         guideId={guideId}
         isOwner={isOwner}
         userId={userId}
-        // Keep the study time on the guide when Builder Bot saves a new
-        // version — its schema does not carry the field, so without this
-        // merge the "Built for a 2-hour session" label would vanish
-        // after the first edit.
+        // Keep the study time and the given resources on the guide when
+        // Builder Bot saves a new version — see withPreservedFields.
         onGuideUpdated={(next) =>
-          onGuideUpdated?.({
-            ...next,
-            studyHours: next.studyHours ?? result.studyHours,
-          })
+          onGuideUpdated?.(withPreservedFields(next))
         }
       />
     </div>

@@ -191,6 +191,39 @@ export const FaqItemSchema = z.object({
   answer: z.string().describe("A clear, direct answer to the question, derived from the supplied material."),
 });
 
+/**
+ * One material the teacher gave for the unit — a file the student
+ * uploaded when this guide was generated. Names and kinds only: file
+ * contents are NEVER stored in the guide JSON (they would bloat saves
+ * and leak private uploads); the extracted text the guide was built
+ * from is already in the guide itself. Empty/absent when nothing was
+ * uploaded — the section never renders then, and nothing is invented.
+ */
+export const GivenResourceSchema = z.object({
+  name: z
+    .string()
+    .max(200)
+    .optional()
+    .describe("The file name exactly as the student uploaded it. Omitted for uploaded images, which carry no file name in the generate request."),
+  kind: z
+    .enum(["pdf", "text", "image"])
+    .describe("What kind of material this is: a PDF, a text file (.txt/.md/.csv), or an uploaded image."),
+  size: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("File size in bytes, when the uploader sent it."),
+  chars: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Characters of extracted text from this file that were included when the guide was generated, when known."),
+});
+
+export type GivenResource = z.infer<typeof GivenResourceSchema>;
+
 export const GenerateResultSchema = z.object({
   topicType: z
     .string()
@@ -268,6 +301,11 @@ export const GenerateResultSchema = z.object({
   finalReview: CheckpointSchema.optional().describe(
     "A final review quiz covering the whole guide — filled in by the enrichment pass."
   ),
+  givenResources: z
+    .array(GivenResourceSchema)
+    .max(20)
+    .optional()
+    .describe("The materials the teacher gave for this unit — the files the student uploaded when generating this guide (file names and kinds only; file contents are never stored). Empty or omitted when nothing was uploaded."),
 });
 
 export type GuideJson = z.infer<typeof GenerateResultSchema>;

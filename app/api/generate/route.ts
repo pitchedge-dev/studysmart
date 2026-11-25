@@ -35,6 +35,7 @@ import {
   repairMinModules,
   studyTimeGuidance,
 } from "@/lib/studyTime";
+import { parseGivenResources } from "@/lib/givenResources";
 
 // Simplified fallback shape, used once if the full shape fails to validate:
 // concepts + targeted practice only, no checkpoint / reasoning / core ideas.
@@ -166,9 +167,11 @@ function missingParts(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { text, images, includeQuiz, extractConcepts, educationLevel, testTiming, studyHours } = body as {
+    const { text, images, files, includeQuiz, extractConcepts, educationLevel, testTiming, studyHours } = body as {
       text?: string;
       images?: string[];
+      /** Optional per-file metadata the Generate form may send (name/kind/size). */
+      files?: unknown;
       includeQuiz?: boolean;
       extractConcepts?: boolean;
       educationLevel?: string;
@@ -414,6 +417,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // "Given resources" — the materials the teacher gave for the unit:
+    // the files uploaded with this generation. Read from the request
+    // the form already sends (an explicit `files` array when present,
+    // otherwise the `--- From file: <name> ---` markers in the text
+    // plus the uploaded images). Names/kinds only — file contents are
+    // never stored. Empty when nothing was uploaded, so the section
+    // simply does not render. The saved guide carries this field, so
+    // it survives reloads and shows on the standalone guide page.
+    const givenResources = parseGivenResources({ text, images, files });
+
     return NextResponse.json({
       topicType: core.topicType,
       languageCode: core.languageCode,
@@ -421,6 +434,7 @@ export async function POST(req: NextRequest) {
       studyGuide: core.studyGuide,
       summary: core.summary,
       studyHours: hours,
+      givenResources: givenResources.length > 0 ? givenResources : undefined,
       keyTerms: core.keyTerms ?? [],
       keyConcepts: core.keyConcepts ?? [],
       modules: core.modules ?? [],
