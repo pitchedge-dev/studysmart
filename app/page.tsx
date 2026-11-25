@@ -71,6 +71,7 @@ import Pronunciation from "@/components/Pronunciation";
 import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
 import GuideVideos from "@/components/GuideVideos";
+import GuideNavBar, { type GuideNavSection } from "@/components/GuideNavBar";
 import FeedbackModal from "@/components/FeedbackModal";
 import WelcomeModal, { hasSeenWelcome } from "@/components/WelcomeModal";
 import MeetYourBots from "@/components/MeetYourBots";
@@ -356,8 +357,10 @@ export default function Home() {
 
   // Guide navigation state
   const [collapsedModules, setCollapsedModules] = useState<Record<number, boolean>>({});
-  const [activeModule, setActiveModule] = useState<number>(1);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  // In-guide nav bar (inline guide view): which section is on screen + reading progress.
+  const [activeInlineSection, setActiveInlineSection] = useState("overview");
+  const [inlineScrollProgress, setInlineScrollProgress] = useState(0);
 
   // Per-user error tracking for the guide currently on screen — one copy,
   // one key. Saved guides use their row id; unsaved in-session guides use
@@ -592,27 +595,6 @@ export default function Home() {
     };
   }, [user]);
 
-  // ---- Guide navigation: which module is on screen + back-to-top -------
-  useEffect(() => {
-    if (!result?.modules?.length) return;
-    const sections = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-module]")
-    );
-    if (sections.length === 0) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveModule(Number(entry.target.getAttribute("data-module")));
-          }
-        }
-      },
-      { rootMargin: "-20% 0px -70% 0px" }
-    );
-    sections.forEach((s) => observer.observe(s));
-    return () => observer.disconnect();
-  }, [result]);
-
   useEffect(() => {
     const onScroll = () => setShowBackToTop(window.scrollY > 600);
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -773,7 +755,7 @@ export default function Home() {
       setCheckpointByModule({});
       setBestScores({});
       setCollapsedModules({});
-      setActiveModule(1);
+      setActiveInlineSection("overview");
       setSection("generate");
       setResultView("guide");
       setWorkspaceOpen(false);
@@ -854,7 +836,7 @@ export default function Home() {
     setCheckpointByModule({});
     setBestScores({});
     setCollapsedModules({});
-    setActiveModule(1);
+    setActiveInlineSection("overview");
     setSection("generate");
     setResultView("guide");
     setWorkspaceOpen(false);
@@ -957,6 +939,79 @@ export default function Home() {
   }
 
   const modules = result?.modules ?? [];
+
+  // Sections for the in-guide nav bar (inline view): only the sections
+  // this guide actually has, in document order.
+  const inlineNavSections: GuideNavSection[] = result
+    ? [
+        ...(result.guideTitle || result.summary
+          ? [{ id: "overview", label: "Overview" }]
+          : []),
+        ...(result.objectives && result.objectives.length > 0
+          ? [{ id: "objectives", label: "What you'll learn", shortLabel: "Learn" }]
+          : []),
+        ...(result.keyTerms && result.keyTerms.length > 0
+          ? [{ id: "glossary", label: "Glossary" }]
+          : []),
+        ...(result.cheatSheet
+          ? [{ id: "cheat-sheet", label: "Cheat sheet" }]
+          : []),
+        ...modules.map((m) => ({
+          id: `module-${m.moduleNumber}`,
+          label: `Module ${m.moduleNumber}: ${m.title}`,
+          shortLabel: `Module ${m.moduleNumber}`,
+        })),
+        ...(result.realWorldApplications &&
+        result.realWorldApplications.length > 0
+          ? [{ id: "applications", label: "Real life", shortLabel: "Real life" }]
+          : []),
+        ...(result.faq && result.faq.length > 0
+          ? [{ id: "faq", label: "FAQ" }]
+          : []),
+        ...(result.finalReview && result.finalReview.questions.length > 0
+          ? [{ id: "final-review", label: "Final review" }]
+          : []),
+        ...(result.keyConcepts.length > 0
+          ? [{ id: "key-concepts", label: "Key concepts" }]
+          : []),
+        { id: "videos", label: "Videos" },
+      ]
+    : [];
+
+  // Reading progress + scroll-spy for the inline guide view (mirrors GuideView).
+  useEffect(() => {
+    const onScroll = () => {
+      const el = document.documentElement;
+      const max = el.scrollHeight - el.clientHeight;
+      setInlineScrollProgress(
+        max > 0 ? Math.min(100, (el.scrollTop / max) * 100) : 0
+      );
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const sections = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-guide-section]")
+    );
+    if (sections.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveInlineSection(
+              entry.target.getAttribute("data-guide-section") ?? "overview"
+            );
+          }
+        }
+      },
+      { rootMargin: "-15% 0px -70% 0px" }
+    );
+    sections.forEach((s) => observer.observe(s));
+    return () => observer.disconnect();
+  }, [result, resultView]);
   const totalCards = modules.reduce((n, m) => n + m.concepts.length, 0);
   const totalPracticeProblems = modules.reduce(
     (n, m) => n + m.practice.reduce((a, g) => a + g.problems.length, 0),
@@ -1660,7 +1715,11 @@ export default function Home() {
           {resultView === "guide" && result && (
             <div className="mt-6 space-y-5">
               {result.guideTitle && (
-                <div>
+                <div
+                  id="overview"
+                  data-guide-section="overview"
+                  className="scroll-mt-32"
+                >
                   <h1 className="text-3xl font-extrabold tracking-tight text-ink-900 sm:text-4xl">
                     {result.guideTitle}
                   </h1>
@@ -1725,6 +1784,23 @@ export default function Home() {
                 </div>
               )}
 
+              {result && inlineNavSections.length > 0 && (
+                <GuideNavBar
+                  title={result.guideTitle ?? "Study Guide"}
+                  backHref="/"
+                  onBack={() => setSection("my-guides")}
+                  sections={inlineNavSections}
+                  activeSection={activeInlineSection}
+                  progress={inlineScrollProgress}
+                  onNavigate={(id) =>
+                    document
+                      .getElementById(id)
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
+                  stickyTopClass="top-[72px]"
+                />
+              )}
+
               <MasterySummary records={guideErrors.records} />
               <StudyPlan testTiming={testTiming} modules={modules} studyHours={result.studyHours} />
 
@@ -1740,7 +1816,11 @@ export default function Home() {
               )}
 
               {result.objectives && result.objectives.length > 0 && (
-                <div className="card p-5 sm:p-6">
+                <div
+                  id="objectives"
+                  data-guide-section="objectives"
+                  className="card scroll-mt-32 p-5 sm:p-6"
+                >
                   <h2 className="text-sm font-bold tracking-tight text-ink-900">
                     What you&apos;ll learn
                   </h2>
@@ -1758,7 +1838,11 @@ export default function Home() {
               )}
 
               {result.keyTerms && result.keyTerms.length > 0 && (
-                <div className="card p-5 sm:p-6">
+                <div
+                  id="glossary"
+                  data-guide-section="glossary"
+                  className="card scroll-mt-32 p-5 sm:p-6"
+                >
                   <h2 className="text-sm font-bold tracking-tight text-ink-900">
                     Glossary
                   </h2>
@@ -1781,7 +1865,11 @@ export default function Home() {
               )}
 
               {result.cheatSheet && (
-                <div className="card overflow-hidden">
+                <div
+                  id="cheat-sheet"
+                  data-guide-section="cheat-sheet"
+                  className="card scroll-mt-32 overflow-hidden"
+                >
                   <div className="border-b border-ink-100 bg-gradient-to-r from-brand-50 to-accent-50 px-5 py-4 sm:px-6">
                     <h2 className="text-sm font-bold tracking-tight text-ink-900">
                       Cheat sheet — the whole guide on one page
@@ -1794,43 +1882,6 @@ export default function Home() {
                     <ReactMarkdown>{result.cheatSheet}</ReactMarkdown>
                   </article>
                 </div>
-              )}
-
-              {modules.length > 0 && (
-                <nav
-                  aria-label="Guide contents"
-                  className="card sticky top-[72px] z-20 p-4 shadow-soft"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-bold tracking-tight text-ink-900">
-                      On this page
-                    </p>
-                    <p className="text-xs font-semibold text-ink-400">
-                      Module {Math.min(activeModule, modules.length)} of{" "}
-                      {modules.length}
-                    </p>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {modules.map((m) => (
-                      <button
-                        key={m.moduleNumber}
-                        type="button"
-                        onClick={() =>
-                          document
-                            .getElementById(`module-${m.moduleNumber}`)
-                            ?.scrollIntoView({ behavior: "smooth" })
-                        }
-                        className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                          activeModule === m.moduleNumber
-                            ? "bg-gradient-to-b from-brand-500 to-brand-600 text-white shadow-glow"
-                            : "bg-ink-100 text-ink-700 hover:bg-ink-200"
-                        }`}
-                      >
-                        {m.moduleNumber}. {m.title}
-                      </button>
-                    ))}
-                  </div>
-                </nav>
               )}
 
               {modules.length > 0 && (
@@ -2027,6 +2078,7 @@ export default function Home() {
                       key={mod.moduleNumber}
                       id={`module-${mod.moduleNumber}`}
                       data-module={mod.moduleNumber}
+                      data-guide-section={`module-${mod.moduleNumber}`}
                       className="scroll-mt-36 space-y-5"
                     >
                       <div className="card relative overflow-hidden p-5 sm:p-6">
@@ -2147,7 +2199,11 @@ export default function Home() {
 
               {result.realWorldApplications &&
                 result.realWorldApplications.length > 0 && (
-                  <div className="card p-5 sm:p-6">
+                  <div
+                    id="applications"
+                    data-guide-section="applications"
+                    className="card scroll-mt-32 p-5 sm:p-6"
+                  >
                     <h2 className="text-base font-bold tracking-tight text-ink-900">
                       Where this shows up in real life
                     </h2>
@@ -2165,7 +2221,11 @@ export default function Home() {
                 )}
 
               {result.faq && result.faq.length > 0 && (
-                <div className="card p-5 sm:p-6">
+                <div
+                  id="faq"
+                  data-guide-section="faq"
+                  className="card scroll-mt-32 p-5 sm:p-6"
+                >
                   <h2 className="text-base font-bold tracking-tight text-ink-900">
                     Frequently asked questions
                   </h2>
@@ -2188,7 +2248,11 @@ export default function Home() {
               )}
 
               {result.finalReview && result.finalReview.questions.length > 0 && (
-                <div>
+                <div
+                  id="final-review"
+                  data-guide-section="final-review"
+                  className="scroll-mt-32"
+                >
                   <h2 className="text-xl font-extrabold tracking-tight">
                     Final review — test yourself on the whole guide
                   </h2>
@@ -2206,7 +2270,11 @@ export default function Home() {
               )}
 
               {result.keyConcepts.length > 0 && (
-                <div className="card p-5">
+                <div
+                  id="key-concepts"
+                  data-guide-section="key-concepts"
+                  className="card scroll-mt-32 p-5"
+                >
                   <h2 className="text-sm font-bold tracking-tight text-ink-900">
                     Key Concepts
                   </h2>
@@ -2220,11 +2288,17 @@ export default function Home() {
                 </div>
               )}
 
-              <GuideVideos
-                topic={result.guideTitle || "Study guide"}
-                moduleTitles={modules.map((m) => m.title)}
-                guideKey={`${result.guideTitle}::${result.studyGuide.length}`}
-              />
+              <div
+                id="videos"
+                data-guide-section="videos"
+                className="scroll-mt-32"
+              >
+                <GuideVideos
+                  topic={result.guideTitle || "Study guide"}
+                  moduleTitles={modules.map((m) => m.title)}
+                  guideKey={`${result.guideTitle}::${result.studyGuide.length}`}
+                />
+              </div>
 
               <div className="flex flex-wrap items-center gap-3">
                 <button

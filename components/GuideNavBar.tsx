@@ -29,6 +29,7 @@ export type GuideNavSection = {
 export default function GuideNavBar({
   title,
   backHref,
+  onBack,
   sections,
   activeSection,
   progress,
@@ -36,7 +37,9 @@ export default function GuideNavBar({
   stickyTopClass = "top-16",
 }: {
   title: string;
-  backHref: string;
+  backHref?: string;
+  /** When provided, the back control is a button calling this instead of a link — used by views where "back" means switching a tab, not a route. */
+  onBack?: () => void;
   sections: GuideNavSection[];
   activeSection: string;
   /** Reading progress, 0–100. */
@@ -50,14 +53,26 @@ export default function GuideNavBar({
       aria-label="Guide navigation"
       className={`card sticky ${stickyTopClass} z-30 flex items-center gap-2 px-2 py-2 sm:px-3`}
     >
-      <Link
-        href={backHref}
-        title="Back to Your Study Guides"
-        className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        <span className="hidden sm:inline">Guides</span>
-      </Link>
+      {onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          title="Back to Your Study Guides"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">Guides</span>
+        </button>
+      ) : (
+        <Link
+          href={backHref ?? "/"}
+          title="Back to Your Study Guides"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">Guides</span>
+        </Link>
+      )}
 
       <span
         className="hidden h-5 w-px shrink-0 bg-ink-100 md:block"
