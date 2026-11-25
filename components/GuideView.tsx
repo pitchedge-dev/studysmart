@@ -31,6 +31,7 @@ import Pronunciation from "./Pronunciation";
 import ShowYourReasoning from "./ShowYourReasoning";
 import SectionCheckpoint from "./SectionCheckpoint";
 import GuideVideos from "./GuideVideos";
+import GuideNavBar, { type GuideNavSection } from "./GuideNavBar";
 import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
 import MeetYourBots from "./MeetYourBots";
@@ -320,10 +321,46 @@ export default function GuideView({
       entries.push({ id: "final-review", label: "Final review", kind: "section" });
     if (modules.some((m) => m.practice.length > 0))
       entries.push({ id: "practice", label: "Targeted practice", kind: "section" });
+    if (result.keyConcepts.length > 0)
+      entries.push({ id: "key-concepts", label: "Key concepts", kind: "section" });
+    // Videos always render — even with no verified video the section
+    // shows YouTube search links — so it is always a nav target.
+    entries.push({ id: "videos", label: "Videos that explain this", kind: "section" });
     if (quiz.length > 0)
       entries.push({ id: "practice-quiz", label: "Practice quiz", kind: "section" });
     return entries;
   }, [modules, quiz.length, result]);
+
+  // Short labels for the sticky in-guide nav bar: modules read as
+  // "Module 1", long section names get a short form; the full label
+  // stays on the button's title attribute.
+  const NAV_SHORT_LABELS: Record<string, string> = {
+    objectives: "What you'll learn",
+    "cheat-sheet": "Cheat sheet",
+    glossary: "Glossary",
+    applications: "Real life",
+    faq: "FAQ",
+    "final-review": "Final review",
+    practice: "Practice",
+    "key-concepts": "Key concepts",
+    videos: "Videos",
+    "practice-quiz": "Quiz",
+  };
+  const navSections: GuideNavSection[] = useMemo(
+    () =>
+      toc
+        .filter((e) => e.kind !== "concept")
+        .map((e) => ({
+          id: e.id,
+          label: e.label,
+          shortLabel:
+            e.kind === "module"
+              ? e.label.split(":")[0]
+              : (NAV_SHORT_LABELS[e.id] ?? e.label),
+        })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [toc]
+  );
 
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -629,6 +666,22 @@ export default function GuideView({
         />
       </div>
 
+      {/* Sticky in-guide nav bar — the guide's own navigation: back to
+          Your Study Guides, the title, jump links to this guide's real
+          sections (only the ones it has), and reading progress. It sticks
+          just under the /guide/[id] header (64px), so scroll offsets
+          below use scroll-mt-32. */}
+      <div className="mt-6">
+        <GuideNavBar
+          title={result.guideTitle ?? "Study Guide"}
+          backHref={backHref}
+          sections={navSections}
+          activeSection={activeSection}
+          progress={scrollProgress}
+          onNavigate={scrollToId}
+        />
+      </div>
+
       {/* Mastery summary + study plan, from this user's real answers and
           the test date they gave. */}
       <div className="mt-6 space-y-4">
@@ -657,7 +710,7 @@ export default function GuideView({
 
         <div className={focusMode ? "focus-measure min-w-0 space-y-5" : "min-w-0 space-y-5"}>
           {/* Overview */}
-          <section id="overview" data-guide-section="overview" className="scroll-mt-6 space-y-5">
+          <section id="overview" data-guide-section="overview" className="scroll-mt-32 space-y-5">
             {result.summary && (
               <div className="card p-5 sm:p-6">
                 <h2 className="text-sm font-bold tracking-tight text-ink-900">Summary</h2>
@@ -668,7 +721,7 @@ export default function GuideView({
 
           {/* Objectives */}
           {result.objectives && result.objectives.length > 0 && (
-            <section id="objectives" data-guide-section="objectives" className="scroll-mt-6">
+            <section id="objectives" data-guide-section="objectives" className="scroll-mt-32">
               <div className="card p-5 sm:p-6">
                 <h2 className="text-base font-bold tracking-tight text-ink-900">
                   What you&apos;ll learn
@@ -689,7 +742,7 @@ export default function GuideView({
 
           {/* Cheat sheet */}
           {result.cheatSheet && (
-            <section id="cheat-sheet" data-guide-section="cheat-sheet" className="scroll-mt-6">
+            <section id="cheat-sheet" data-guide-section="cheat-sheet" className="scroll-mt-32">
               <div className="card overflow-hidden">
                 <div className="border-b border-ink-100 bg-gradient-to-r from-brand-50 to-accent-50 px-5 py-4 sm:px-6">
                   <h2 className="text-base font-bold tracking-tight text-ink-900">
@@ -823,7 +876,7 @@ export default function GuideView({
                 key={mod.moduleNumber}
                 id={`module-${mod.moduleNumber}`}
                 data-guide-section={`module-${mod.moduleNumber}`}
-                className="scroll-mt-6 space-y-5"
+                className="scroll-mt-32 space-y-5"
               >
                 <div className="card relative overflow-hidden p-5 sm:p-6">
                   <div className="absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b from-brand-500 to-accent-400" />
@@ -908,7 +961,7 @@ export default function GuideView({
 
           {/* Glossary */}
           {result.keyTerms && result.keyTerms.length > 0 && (
-            <section id="glossary" data-guide-section="glossary" className="scroll-mt-6">
+            <section id="glossary" data-guide-section="glossary" className="scroll-mt-32">
               <div className="card p-5 sm:p-6">
                 <h2 className="text-base font-bold tracking-tight text-ink-900">Glossary</h2>
                 <p className="mt-1 text-xs font-medium text-ink-400">
@@ -928,7 +981,7 @@ export default function GuideView({
 
           {/* Real-world applications */}
           {result.realWorldApplications && result.realWorldApplications.length > 0 && (
-            <section id="applications" data-guide-section="applications" className="scroll-mt-6">
+            <section id="applications" data-guide-section="applications" className="scroll-mt-32">
               <div className="card p-5 sm:p-6">
                 <h2 className="text-base font-bold tracking-tight text-ink-900">
                   Where this shows up in real life
@@ -949,7 +1002,7 @@ export default function GuideView({
 
           {/* FAQ */}
           {result.faq && result.faq.length > 0 && (
-            <section id="faq" data-guide-section="faq" className="scroll-mt-6">
+            <section id="faq" data-guide-section="faq" className="scroll-mt-32">
               <div className="card p-5 sm:p-6">
                 <h2 className="text-base font-bold tracking-tight text-ink-900">
                   Frequently asked questions
@@ -973,7 +1026,7 @@ export default function GuideView({
 
           {/* Final review */}
           {result.finalReview && result.finalReview.questions.length > 0 && (
-            <section id="final-review" data-guide-section="final-review" className="scroll-mt-6">
+            <section id="final-review" data-guide-section="final-review" className="scroll-mt-32">
               <h2 className="text-xl font-extrabold tracking-tight">
                 Final review — test yourself on the whole guide
               </h2>
@@ -998,7 +1051,7 @@ export default function GuideView({
 
           {/* Targeted practice */}
           {modules.length > 0 && (
-            <section id="practice" data-guide-section="practice" className="scroll-mt-6">
+            <section id="practice" data-guide-section="practice" className="scroll-mt-32">
               <TargetedPractice
                 modules={modules}
                 onAskTutor={openPracticeTutor}
@@ -1030,7 +1083,11 @@ export default function GuideView({
 
           {/* Key concepts */}
           {result.keyConcepts.length > 0 && (
-            <div className="card p-5">
+            <div
+              id="key-concepts"
+              data-guide-section="key-concepts"
+              className="card scroll-mt-32 p-5"
+            >
               <h2 className="text-sm font-bold tracking-tight text-ink-900">Key Concepts</h2>
               <div className="mt-3 flex flex-wrap gap-2">
                 {result.keyConcepts.map((concept, i) => (
@@ -1042,19 +1099,23 @@ export default function GuideView({
             </div>
           )}
 
-          {/* Videos that explain this topic */}
-          <GuideVideos
-            topic={result.guideTitle ?? "Study guide"}
-            moduleTitles={modules.map((m) => m.title)}
-            guideKey={
-              guideKey ??
-              `${result.guideTitle}::${result.studyGuide.length}`
-            }
-          />
+          {/* Videos that explain this topic — anchored so the nav bar
+              and the contents list can jump to it, and the scroll-spy
+              can highlight it. */}
+          <section id="videos" data-guide-section="videos" className="scroll-mt-32">
+            <GuideVideos
+              topic={result.guideTitle ?? "Study guide"}
+              moduleTitles={modules.map((m) => m.title)}
+              guideKey={
+                guideKey ??
+                `${result.guideTitle}::${result.studyGuide.length}`
+              }
+            />
+          </section>
 
           {/* Practice quiz */}
           {quiz.length > 0 && (
-            <section id="practice-quiz" data-guide-section="practice-quiz" className="scroll-mt-6 space-y-5">
+            <section id="practice-quiz" data-guide-section="practice-quiz" className="scroll-mt-32 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-xl font-extrabold tracking-tight">Practice Quiz</h2>
                 <button

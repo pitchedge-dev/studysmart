@@ -33,7 +33,21 @@ export default function GuideVideos({
   const [searchLinks, setSearchLinks] = useState<SearchLink[]>([]);
 
   useEffect(() => {
-    if (!topic.trim()) return;
+    // No topic (shouldn't happen — both callers default it) — show
+    // search links for the modules instead of a forever-loading
+    // skeleton.
+    if (!topic.trim()) {
+      setVideos([]);
+      setSearchLinks(
+        moduleTitles.filter(Boolean).slice(0, 4).map((label) => ({
+          label,
+          url: `https://www.youtube.com/results?search_query=${encodeURIComponent(
+            `${label} explained`
+          )}`,
+        }))
+      );
+      return;
+    }
     let cancelled = false;
     setVideos(null);
     setSearchLinks([]);
