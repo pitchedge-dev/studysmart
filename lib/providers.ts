@@ -5,16 +5,21 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 
 /**
- * Cross-provider AI routing, PER CATEGORY — 10 providers.
+ * Cross-provider AI routing, PER CATEGORY — 12 providers.
  *
  * History: everything used to go through Google Gemini only, and the
  * Gemini free tier (~20 requests/day on Flash) kept getting exhausted,
  * which blocked the whole site. First we added one global fallback list
  * (Gemini → Groq → OpenRouter). Then each category routed to the provider
  * best for that job first, with the other two free providers as backups.
- * Now every category routes through TEN free providers (primary + up to
- * 10 backups), so generation never hits a dead end when one provider's
- * free quota runs out.
+ * Now every category routes through TWELVE free providers (primary +
+ * up to 12 backups), so generation never hits a dead end when one
+ * provider's free quota runs out. The Nov 2026 API hunt
+ * (docs/api-hunt-2026-11-25.md) tested ~50 candidates and added the
+ * last two: Pollinations (no key at all — verified live) and GitHub
+ * Models (gated on GITHUB_TOKEN, NOT yet live-verified: the POST test
+ * was blocked by an approval timeout, so it sits LAST and only
+ * activates once a key is set).
  *
  * A provider with no key set is skipped silently, so the app works
  * exactly as before with only the Gemini key set. Keys come ONLY from
@@ -41,18 +46,44 @@ import type { LanguageModel } from "ai";
  *  9. DeepSeek — 5M free tokens on signup, no card, VALID 30 DAYS.
  *     NOT an ongoing free tier — it expires, so it sits last-but-one.
  * 10. Novita AI — $1 one-time signup credit, no card. Tiny and
- *     one-time, so it sits LAST. Once it is spent, it is paid-only.
+ *     one-time, so it sits LAST among the keyed providers. Once it is
+ *     spent, it is paid-only.
+ * 11. Pollinations — NO KEY AT ALL. Free public text API, verified
+ *     live 2026-11-25 (GET returned the exact reply, HTTP 200, ~1.3s;
+ *     JSON mode also verified). Rate limits are unpublished and it is
+ *     a shared public service, so it sits near the end as the safety
+ *     net: it can only fire when every keyed provider failed, which
+ *     is exactly when a no-key fallback matters. Its OpenAI-compatible
+ *     POST endpoint (used by the AI SDK) is documented but could NOT
+ *     be live-tested from this environment (approval timeout) — if it
+ *     ever 400s, the chain treats it as retryable and the request
+ *     simply ends there, no worse than before.
+ * 12. GitHub Models — UNVERIFIED. Free with a GitHub token
+ *     (GITHUB_TOKEN), model openai/gpt-4.1-mini (fast, vision-capable
+ *     per its model card). The inference host IS alive (GET to the
+ *     chat-completions path returned HTTP 200 "OK", 0.76s, 2026-11-25),
+ *     which refutes the old "retired July 2026" note — but the
+ *     authenticated POST test was blocked by an approval timeout, so
+ *     this provider is wired but LAST in every chain and only active
+ *     once GITHUB_TOKEN is set. Verify with one curl before setting
+ *     the key (see docs/api-hunt-2026-11-25.md).
  *
  * REJECTED (do not add): Mistral (phone verification required),
  * Together AI (no free tier, $15 min purchase), Fireworks AI (no free
- * plan), Hugging Face Inference (free serverless API gone, pay-as-you-go
- * only), Chutes AI (free tier ended 2026-03-15), GitHub Models (retired
- * July 2026), DeepInfra (no free tier — card or pre-pay required before
- * any request succeeds).
+ * plan), Chutes AI (free tier ended 2026-03-15), DeepInfra (no free
+ * tier — card or pre-pay required before any request succeeds),
+ * OpenAI / Anthropic / xAI / Perplexity (paid-only APIs),
+ * Replicate / Azure OpenAI / AWS Bedrock / Google Vertex AI / IBM
+ * watsonx / Oracle OCI (need a payment card), DuckDuckGo AI (no
+ * official API), Puter.js (client-side only, not server-usable).
+ * Hugging Face Inference Providers: NOT rejected, NOT wired — a free
+ * token exists but the no-key probe could not be run from here
+ * (approval timeout); it is on the signup shortlist in the hunt doc.
  *
  * Research:
  * ~/workspace/goals/studysmart-educational-web-app/hidden_files/multi-provider-research-2026-11-24.md
  * ~/workspace/goals/studysmart-educational-web-app/hidden_files/ten-backup-providers-research-2026-11-24.md
+ * docs/api-hunt-2026-11-25.md
  */
 
 export type GenerationCategory =
@@ -216,14 +247,41 @@ export const DEEPSEEK_TEXT_MODEL = "deepseek-chat";
 export const NOVITA_TEXT_MODEL = "openai/gpt-oss-120b";
 
 // ---------------------------------------------------------------------------
+// Pollinations (NO KEY — free public text API, verified live 2026-11-25).
+// Reached through its OpenAI-compatibility endpoint. Model: "openai"
+// (the default model). No vision model is claimed for it — vision was
+// not verified — so it is NOT in the reasoning chain. It sits near the
+// end of every text chain as the no-key safety net.
+// ---------------------------------------------------------------------------
+
+export const POLLINATIONS_TEXT_MODEL = "openai";
+
+// ---------------------------------------------------------------------------
+// GitHub Models (UNVERIFIED — free with a GitHub token, GITHUB_TOKEN).
+// The fast model is openai/gpt-4.1-mini, which is vision-capable per
+// its model card, so it is in the reasoning chain too. The inference host answered a GET
+// with HTTP 200 on 2026-11-25, but the authenticated POST test was
+// blocked by an approval timeout — verify with one curl (see the hunt
+// doc) before setting GITHUB_TOKEN. Until then it is LAST everywhere
+// and inactive without a key.
+// ---------------------------------------------------------------------------
+
+export const GITHUB_TEXT_MODEL = "openai/gpt-4.1-mini";
+
+/** Same model — gpt-4.1-mini is multimodal, so it doubles as the vision model. */
+export const GITHUB_VISION_MODEL = "openai/gpt-4.1-mini";
+
+// ---------------------------------------------------------------------------
 // Per-category routing.
 // Each category lists its models grouped by provider: the PRIMARY provider
-// first (best for that job), then backups in priority order — 10 providers
-// per category (primary + up to 10 backups). The same provider appears in
+// first (best for that job), then backups in priority order — 12 providers
+// per category (primary + up to 12 backups). The same provider appears in
 // several categories. Within a provider, models are ordered best-first
 // for the job. Cerebras sits low for guides (8K free-tier context cap)
-// and high for short jobs (fastest). DeepSeek and Novita sit last
-// everywhere (their free access expires / is one-time).
+// and high for short jobs (fastest). DeepSeek and Novita sit last among
+// the keyed providers (their free access expires / is one-time); after
+// them come Pollinations (no key — the safety net) and GitHub Models
+// (unverified, key-gated, last).
 // ---------------------------------------------------------------------------
 
 type ProviderKind =
@@ -236,7 +294,9 @@ type ProviderKind =
   | "cohere"
   | "cloudflare"
   | "deepseek"
-  | "novita";
+  | "novita"
+  | "pollinations"
+  | "github";
 type ModelSpec = readonly [ProviderKind, string];
 
 export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
@@ -246,7 +306,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // output. Then Groq 120b (strict json_schema, 500 tok/s, 1,000/day),
     // OpenRouter Nemotron 3 Ultra (strongest free reasoning, JSON 6/6),
     // NVIDIA Nemotron 3 Ultra, SambaNova, Cohere, Cloudflare, Cerebras
-    // (last among ongoing — 8K context cap), DeepSeek, Novita.
+    // (last among ongoing — 8K context cap), DeepSeek, Novita,
+    // Pollinations (no key), GitHub Models (unverified, last).
     guides: [
       ["google", "gemini-3.8-flash"],
       ["google", "gemini-3.6-flash"],
@@ -263,6 +324,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cerebras", "gpt-oss-120b"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
     // Conversational tutor, short replies — latency is what matters.
     // Primary Groq 20b: ~1,000 tok/s, first token ~0.24s. Then Gemini
@@ -285,6 +348,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
     // Battle Arena games — short trivia, templates must return in seconds.
     // Primary Groq 20b: fastest by far. Then Gemini Lite, OpenRouter
@@ -305,6 +370,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
     // Small structured question sets — schema reliability matters most
     // (this route failed on a schema mismatch before). Primary Gemini
@@ -326,6 +393,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cerebras", "gpt-oss-120b"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
     // Suggesting real YouTube video IDs — knowledge-heavy.
     // Primary Gemini 3.8: broadest knowledge, proven for video IDs here.
@@ -346,6 +415,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cerebras", "qwen-3-235b-a22b-instruct-2507"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
     // Vision: reads a handwriting PNG and grades work + process.
     // Text-only models are NOT in this list — sending them an image would
@@ -367,6 +438,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["sambanova", "gemma-4-31B-it"],
       ["cohere", "command-a-vision-07-2025"],
       ["cloudflare", "@cf/meta/llama-3.2-11b-vision-instruct"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
   } as const;
 
@@ -388,6 +460,8 @@ export const CATEGORY_ROUTING: Record<
       "Cerebras (gpt-oss-120b, 8K context cap)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
+      "Pollinations (openai, no key — safety net)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   chat: {
@@ -402,6 +476,8 @@ export const CATEGORY_ROUTING: Record<
       "Cloudflare (gpt-oss-120b)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
+      "Pollinations (openai, no key — safety net)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   games: {
@@ -416,6 +492,8 @@ export const CATEGORY_ROUTING: Record<
       "Cloudflare (gpt-oss-120b)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
+      "Pollinations (openai, no key — safety net)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   practice: {
@@ -430,6 +508,8 @@ export const CATEGORY_ROUTING: Record<
       "Cerebras (gpt-oss-120b)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
+      "Pollinations (openai, no key — safety net)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   videos: {
@@ -444,6 +524,8 @@ export const CATEGORY_ROUTING: Record<
       "Cerebras (Qwen 3 235B)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
+      "Pollinations (openai, no key — safety net)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   reasoning: {
@@ -456,6 +538,7 @@ export const CATEGORY_ROUTING: Record<
       "SambaNova (Gemma 4 31B, vision)",
       "Cohere (Command A Vision)",
       "Cloudflare (Llama 3.2 11B Vision)",
+      "GitHub Models (gpt-4.1-mini, vision, needs GITHUB_TOKEN — unverified)",
     ],
   },
 };
@@ -546,6 +629,35 @@ function createNovitaProvider() {
   });
 }
 
+function createPollinationsProvider() {
+  // No key exists for Pollinations — it is a free public API. The AI
+  // SDK requires a non-empty apiKey, so a placeholder is sent; the
+  // service ignores it. Verified live 2026-11-25 (GET: exact reply,
+  // HTTP 200, ~1.3s; JSON mode verified). Its OpenAI-compatible POST
+  // endpoint could not be live-tested from this environment (approval
+  // timeout) — a failure there is retryable and Pollinations sits near
+  // the end of every chain, so the worst case is the request ending
+  // exactly where it would have ended before Pollinations existed.
+  return createOpenAI({
+    apiKey: "pollinations-no-key",
+    baseURL: "https://text.pollinations.ai/openai",
+  });
+}
+
+function createGitHubModelsProvider() {
+  // UNVERIFIED: the inference host answered a GET with HTTP 200 on
+  // 2026-11-25, but the authenticated POST test was blocked by an
+  // approval timeout. This constructor only activates when GITHUB_TOKEN
+  // is set — verify with one curl (docs/api-hunt-2026-11-25.md) before
+  // setting it in Vercel.
+  const apiKey = process.env.GITHUB_TOKEN;
+  if (!apiKey) return null;
+  return createOpenAI({
+    apiKey,
+    baseURL: "https://models.github.ai/inference",
+  });
+}
+
 type ProviderInstances = {
   google: ReturnType<typeof createGoogle>;
   groq: ReturnType<typeof createGroqProvider>;
@@ -557,6 +669,8 @@ type ProviderInstances = {
   cloudflare: ReturnType<typeof createCloudflareProvider>;
   deepseek: ReturnType<typeof createDeepSeekProvider>;
   novita: ReturnType<typeof createNovitaProvider>;
+  pollinations: ReturnType<typeof createPollinationsProvider>;
+  github: ReturnType<typeof createGitHubModelsProvider>;
 };
 
 function buildProviders(): ProviderInstances {
@@ -571,6 +685,8 @@ function buildProviders(): ProviderInstances {
     cloudflare: createCloudflareProvider(),
     deepseek: createDeepSeekProvider(),
     novita: createNovitaProvider(),
+    pollinations: createPollinationsProvider(),
+    github: createGitHubModelsProvider(),
   };
 }
 
@@ -618,7 +734,8 @@ export function getModels(): LanguageModel[] {
  *  (guide enrichment). Groq 20b leads on raw speed, then the Gemini Lite
  *  models, then OpenRouter's most reliable free model + router, then the
  *  fast new providers (Cerebras, NVIDIA, SambaNova), then Cohere,
- *  Cloudflare, DeepSeek, Novita. */
+ *  Cloudflare, DeepSeek, Novita, Pollinations (no key), GitHub Models
+ *  (unverified, last). */
 export function getLiteModels(): LanguageModel[] {
   return resolveSpecs(
     [
@@ -634,6 +751,8 @@ export function getLiteModels(): LanguageModel[] {
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
     ],
     buildProviders()
   );
@@ -721,7 +840,7 @@ export function isRetryableProviderError(err: unknown): boolean {
 }
 
 export const MISSING_KEY_MESSAGE =
-  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, SambaNova, Cohere, Cloudflare, DeepSeek, or Novita) to the environment to generate content.";
+  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, SambaNova, Cohere, Cloudflare, DeepSeek, Novita, or a GitHub token) to the environment to generate content — Pollinations (no key) is always tried last.";
 
 export const OVERLOADED_MESSAGE =
   "All AI providers are busy / out of free calls right now — try again later";
@@ -735,6 +854,9 @@ export function safeErrorDetail(err: unknown): string {
     .replace(/gsk_[0-9A-Za-z]{10,}/g, "[key]")
     .replace(/sk-or-v1-[0-9A-Za-z]{10,}/g, "[key]")
     .replace(/nvapi-[0-9A-Za-z_-]{10,}/g, "[key]")
+    .replace(/ghp_[0-9A-Za-z]{10,}/g, "[key]")
+    .replace(/github_pat_[0-9A-Za-z_]{10,}/g, "[key]")
+    .replace(/gho_[0-9A-Za-z]{10,}/g, "[key]")
     .replace(/sk-[0-9A-Za-z]{10,}/g, "[key]")
     .replace(/\b[0-9a-f]{40}\b/g, "[key]")
     .slice(0, 300);

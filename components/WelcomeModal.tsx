@@ -15,9 +15,11 @@ import MeetYourBots from "./MeetYourBots";
  * is generated fresh by AI the moment you ask — nothing here is premade.
  * Google Gemini answers first, and Groq, OpenRouter, Cerebras, NVIDIA,
  * SambaNova, Cohere, Cloudflare, DeepSeek and Novita are wired in as
- * free backup providers, so if one is busy or out of free calls another
- * one takes over. (Which of them actually have keys set is an env-var
- * matter — the popup claims the wiring, not the keys.)
+ * free backup providers, plus Pollinations — which needs no key at all
+ * and is always tried last as a safety net — so if one is busy or out
+ * of free calls another one takes over. (Which of them actually have
+ * keys set is an env-var matter — the popup claims the wiring, not
+ * the keys.)
  */
 
 export const WELCOME_STORAGE_KEY = "studysmart-welcome-seen";
@@ -114,9 +116,10 @@ export default function WelcomeModal({
               Every guide is generated fresh by AI the moment you ask — nothing
               here is premade. Google Gemini answers first, and Groq,
               OpenRouter, Cerebras, NVIDIA, SambaNova, Cohere, Cloudflare,
-              DeepSeek and Novita are wired in as free backup providers: if
-              one is busy or out of free calls, another takes over
-              automatically.
+              DeepSeek and Novita are wired in as free backup providers,
+              plus Pollinations — which needs no key at all and is always
+              tried last as a safety net. If one is busy or out of free
+              calls, another takes over automatically.
             </p>
           </div>
 
