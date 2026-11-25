@@ -36,6 +36,7 @@ import {
   studyTimeGuidance,
 } from "@/lib/studyTime";
 import { parseGivenResources } from "@/lib/givenResources";
+import { qualityIssues, sanitizeGuide } from "@/lib/guideQuality";
 
 // Simplified fallback shape, used once if the full shape fails to validate:
 // concepts + targeted practice only, no checkpoint / reasoning / core ideas.
@@ -225,7 +226,7 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join(" ");
 
-    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} This guide must be a COMPLETE, self-contained resource on the topic — thorough enough to stand on its own as a mini study site, not a summary. Organise the material into as many modules as the material supports, up to 6 modules, with up to 6 concepts per module, and include at most one checkpoint in the whole guide. Cover the input topic in depth: never drop a topic from the supplied material, and let depth scale with the input — short notes get a focused but complete guide, long notes get full coverage of everything in them. Never pad with unrelated material and never invent content beyond the input. Start the guide with a short summary of two or three sentences, and include a key-terms glossary with short definitions (up to 20 terms). Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with two problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, a full plain-language explanation of how it works and why it matters (two to four sentences), one worked example, the most common mistake students make with it and how to avoid it, and a short memory tip; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Do NOT include learning objectives, a cheat sheet, real-world applications, a FAQ, or a final review quiz in this pass — those are added later. Keep every field tight so the whole guide fits: short sentences, no repetition, no filler — every sentence earns its place. Each worked example must show the working step by step, with real numbers or a concrete case from the material — never just state the answer. For every multiple-choice problem, write plausible distractors drawn from the common mistakes students make on this topic, and make the explanation say why the correct answer is right and why each distractor is wrong. Never write generic filler sentences such as 'X is important' or 'X is a key concept' — every sentence must teach something specific from the material. Do not repeat the same point in the summary, in the studyGuide Markdown, and in a concept explanation: the studyGuide Markdown is a concise readable overview, the modules carry the detail.`;
+    const systemPrompt = `You are StudySMART, an expert study assistant. First classify the material the user supplies below — derive the topic type only from that material (for example quantitative, language, science, measurement, history, or mixed). Never use a hardcoded topic list, and never classify from any other guide. Then choose the format that fits that classified topic, per module: quantitative material uses rule/formula cards with up to three targeted problems per rule; language and vocabulary material uses spotlight cards with translations and categories plus topic-mastery practice; measurement and science material uses a numbered core-ideas list, one show-your-reasoning worked example, and a section checkpoint quiz with an explanation of why each answer works; other topics use a mixed layout of concept cards, core ideas, and targeted practice. Only include the sections that fit the chosen format for each module — do not force a checkpoint, a reasoning example, or core ideas into a module whose format does not use them. When the material is language material, return the language code for that language and include a phonetic pronunciation spelling for each language concept, generated from the supplied material. Generate study material strictly from the material the user supplies below. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Derive EVERY module, concept, example, practice problem, and quiz question strictly from the supplied material. Never reuse a topic from any other guide, never return a premade guide, and never include content that is not in the supplied material. ${quizInstruction} ${conceptsInstruction} ${tailoring} This guide must be a COMPLETE, self-contained resource on the topic — thorough enough to stand on its own as a mini study site, not a summary. Organise the material into as many modules as the material supports, up to 6 modules, with up to 6 concepts per module, and include at most one checkpoint in the whole guide. Cover the input topic in depth: never drop a topic from the supplied material, and let depth scale with the input — short notes get a focused but complete guide, long notes get full coverage of everything in them. Never pad with unrelated material and never invent content beyond the input. Start the guide with a short summary of two or three sentences, and include a key-terms glossary with short definitions (up to 20 terms). Each module has a title, a one-line intro, a format field naming its chosen layout, concepts in learning order, and targeted practice: one practice group per concept, with two problems per concept. Each concept has a kind (rule, definition, term, formula, verb, or vocabulary item), a short generated label, a title, a formula or definition, a full plain-language explanation of how it works and why it matters (two to four sentences), one worked example, the most common mistake students make with it and how to avoid it, and a short memory tip; vocabulary concepts also carry a translation and a category. Each practice problem has a type (multiple-choice, short-answer, simplify, or reasoning), a question, a correct answer, a step-by-step explanation, and three or four multiple-choice options when the problem suits multiple choice (omit options for short-answer problems). The guide title is the topic of the supplied material followed by "Study Guide". Do NOT include learning objectives, a cheat sheet, real-world applications, a FAQ, or a final review quiz in this pass — those are added later. Keep every field tight so the whole guide fits: short sentences, no repetition, no filler — every sentence earns its place. WORKED EXAMPLES ARE REQUIRED, NOT OPTIONAL: every concept must include a workedExample — a concrete problem with real numbers, dates, values, or a specific case from the material, the working shown step by step (at least 2 steps), and the final answer. Never write a one-line "Example:" and stop — show the steps. For non-numeric topics, work one concrete case step by step (apply the idea to one real event, sentence, or situation, in order). A pure vocabulary definition with genuinely no worked case may omit workedExample, and nothing else may. For every multiple-choice problem, write plausible distractors drawn from the common mistakes students make on this topic, and the explanation must say why the correct answer is right AND why EACH wrong option is wrong — fill in one whyWrong entry per wrong option, naming the mistake behind it. Never explain only the correct answer. Never write generic filler sentences such as 'X is important' or 'X is a key concept' — every sentence must teach something specific from the material. Do not repeat the same point in the summary, in the studyGuide Markdown, and in a concept explanation: say each fact ONCE, in the place where it belongs — the summary states it briefly, the studyGuide Markdown gives the readable overview, and the modules carry the detail, with no fact stated twice across those three. If the supplied material is only a topic name, write the guide from your own knowledge of that topic — never write that notes, content, or information is missing, and never return a blank or placeholder item.`;
 
     const textPart = hasText
       ? `User-supplied material:\n\n${text}`
@@ -331,7 +332,7 @@ export async function POST(req: NextRequest) {
     const enrichmentPromise = (async (): Promise<z.infer<
       typeof EnrichmentSchema
     > | null> => {
-      const enrichmentPrompt = `You are StudySMART. A study guide is being generated from a student's notes below. Add the finishing sections for it, derived STRICTLY from the notes below — do not invent new facts, do not add topics that are not in the notes. Write 3 to 6 learning objectives (what the student will be able to do after studying this guide), a one-page cheat sheet in Markdown (only the essential definitions, formulas, and steps from the whole guide — the page a student glances at right before the test), 3 to 5 real-world applications (where this topic actually shows up in real life), 4 to 6 frequently asked questions a student would actually ask, with clear direct answers, and a final review quiz of 5 to 10 multiple-choice questions covering the whole guide, each with options, the correct answer, and an explanation of why the correct answer works.`;
+      const enrichmentPrompt = `You are StudySMART. A study guide is being generated from a student's notes below. Add the finishing sections for it, derived STRICTLY from the notes below — do not invent new facts, do not add topics that are not in the notes. The notes may be just a topic name: in that case write from your own knowledge of that topic. Never write that notes, content, or information is missing, and never return a blank or placeholder item — every objective and every real-life application must contain real content, or be left out entirely. Write 3 to 6 learning objectives (what the student will be able to do after studying this guide), a one-page cheat sheet in Markdown (only the essential definitions, formulas, and steps from the whole guide — the page a student glances at right before the test), 3 to 5 real-world applications (where this topic actually shows up in real life), 4 to 6 frequently asked questions a student would actually ask, with clear direct answers, and a final review quiz of 5 to 10 multiple-choice questions covering the whole guide, each with options, the correct answer, an explanation of why the correct answer works, and one whyWrong entry for EACH wrong option saying why that option is wrong.`;
       for (const liteModel of getLiteModels()) {
         if (Date.now() - startedAt >= 45000) break;
         try {
@@ -355,7 +356,10 @@ export async function POST(req: NextRequest) {
 
     const [{ core: coreResult, modelUsed, lastErr }, enrichment] =
       await Promise.all([corePromise, enrichmentPromise]);
-    let core = coreResult;
+    // Sanitize FIRST: strip any refusal / blank / broken content the
+    // model produced, so the checks below judge the guide the student
+    // would actually see — not the raw model output.
+    let core = coreResult ? sanitizeGuide(coreResult) : null;
 
     if (!core) {
       // Every model in the chain failed.
@@ -368,24 +372,30 @@ export async function POST(req: NextRequest) {
       throw lastErr;
     }
 
-    // Cheap self-check: a guide that came back missing required parts is
-    // repaired once instead of shipped thin. This only triggers on a
-    // genuinely broken result (see missingParts) — a small guide for a
+    // Cheap self-check: a guide that came back missing required parts
+    // or failing a quality rule is repaired once instead of shipped
+    // thin. This only triggers on a genuinely broken or low-quality
+    // result (see missingParts / qualityIssues) — a small guide for a
     // small input is left alone. The repair regenerates the whole guide
-    // with a prompt naming exactly what was missing, on the model that
-    // already answered; if it fails, times out, or still comes back thin,
-    // the original guide is returned — the repair never fails the request.
-    // The repair only starts with at least 20s of the 60s function
-    // timeout left, so the request still finishes in time.
-    const missing = missingParts(core, {
+    // with a prompt naming exactly what was missing or wrong, on the
+    // model that already answered; the repaired guide is kept only
+    // when it has strictly fewer problems than the original (or none
+    // at all) — the repair never fails the request and never ships a
+    // worse guide. The repair only starts with at least 20s of the
+    // 60s function timeout left, so the request still finishes in time.
+    const checkOpts = {
       extractConcepts: !!extractConcepts,
       includeQuiz: !!includeQuiz,
-    });
-    if (missing.length > 0 && modelUsed && Date.now() - startedAt < 30000) {
+    };
+    const missing = missingParts(core, checkOpts);
+    const quality = qualityIssues(core, checkOpts);
+    const problemCount = missing.length + quality.length;
+    if (problemCount > 0 && modelUsed && Date.now() - startedAt < 30000) {
       // The repair minimum follows the study time, so a short-session
       // guide is not "repaired" into a long one.
       const minModules = repairMinModules(hours);
-      const repairPrompt = `${systemPrompt} IMPORTANT — REPAIR: a previous attempt at this guide came back too thin (missing: ${missing.join("; ")}). Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Keep the same depth and quality standard as a normal generation.`;
+      const problems = [...missing, ...quality].join("; ");
+      const repairPrompt = `${systemPrompt} IMPORTANT — REPAIR: a previous attempt at this guide came back with these problems: ${problems}. Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Every concept needs a workedExample with real numbers or a concrete case and at least 2 steps. Every multiple-choice question needs one whyWrong entry for EACH wrong option. Keep the same depth and quality standard as a normal generation.`;
       try {
         const { object } = await generateObject({
           model: modelUsed,
@@ -396,17 +406,16 @@ export async function POST(req: NextRequest) {
           maxRetries: 0,
           abortSignal: AbortSignal.timeout(20000),
         });
-        if (
-          missingParts(object, {
-            extractConcepts: !!extractConcepts,
-            includeQuiz: !!includeQuiz,
-          }).length === 0
-        ) {
-          core = object;
+        const repaired = sanitizeGuide(object);
+        const repairedProblems =
+          missingParts(repaired, checkOpts).length +
+          qualityIssues(repaired, checkOpts).length;
+        if (repairedProblems < problemCount) {
+          core = repaired;
         } else {
           logError(
-            "[/api/generate] repair still thin, keeping original:",
-            missing
+            "[/api/generate] repair not better, keeping original:",
+            { before: problemCount, after: repairedProblems, problems }
           );
         }
       } catch (repairErr) {
@@ -427,7 +436,12 @@ export async function POST(req: NextRequest) {
     // it survives reloads and shows on the standalone guide page.
     const givenResources = parseGivenResources({ text, images, files });
 
-    return NextResponse.json({
+    // Sanitize the assembled guide once more: the enrichment pass
+    // (objectives, cheat sheet, applications, FAQ, final review) runs
+    // on a separate model call, so its output is cleaned here too —
+    // a blank objective or a refusal in the cheat sheet is dropped
+    // rather than rendered.
+    const response = sanitizeGuide({
       topicType: core.topicType,
       languageCode: core.languageCode,
       guideTitle: core.guideTitle,
@@ -446,6 +460,7 @@ export async function POST(req: NextRequest) {
       faq: enrichment?.faq ?? core.faq ?? [],
       finalReview: enrichment?.finalReview ?? core.finalReview,
     });
+    return NextResponse.json(response);
   } catch (err) {
     logError("[/api/generate] error:", err);
     return NextResponse.json(

@@ -1,4 +1,234 @@
 import type { GenerateResult } from "@/app/page";
+import type { GuideJson } from "./guideSchema";
+
+/** True when the student's request is asking to ADD something (more
+ *  questions, a new concept, another module, extra examples) without
+ *  asking to remove or replace anything. Such requests are additive
+ *  by default: the edit must only add, never silently drop existing
+ *  content to make room. */
+export function isAdditiveRequest(instruction: string): boolean {
+  const text = instruction.toLowerCase();
+  const asksToAdd =
+    /\b(add|more|another|extra|also|include|append)\b/.test(text);
+  const asksToRemove =
+    /\b(remove|delete|drop|replace|cut|shorten|trim|get rid of|take (out|away)|rewrite)\b/.test(
+      text
+    );
+  return asksToAdd && !asksToRemove;
+}
+
+/** Put back anything the edit silently dropped.
+ *
+ *  A model asked to "add 3 more practice questions" will sometimes
+ *  rebuild the guide and quietly drop other content (in the 2026-11-25
+ *  re-test it removed 6 final review questions to add 3 practice
+ *  ones). For an additive request that is never acceptable: this
+ *  merges the BEFORE guide's missing content back into the AFTER
+ *  guide — missing modules, concepts, practice problems, checkpoint
+ *  questions, quiz questions, final review questions, objectives,
+ *  applications, FAQ items, and glossary terms are re-appended.
+ *  The model's own additions are kept; only the silent deletions are
+ *  undone. Returns the merged guide plus a short list of what was
+ *  put back (empty when nothing was missing).
+ */
+export function restoreRemovedContent(
+  before: GuideJson,
+  after: GuideJson
+): { guide: GuideJson; restored: string[] } {
+  const guide = JSON.parse(JSON.stringify(after)) as GuideJson;
+  const restored: string[] = [];
+
+  const byText = (items: { question?: string }[]) =>
+    new Set(items.map((q) => (q.question ?? "").trim()).filter(Boolean));
+
+  // Modules (by number) — a dropped module comes back whole.
+  const afterModules = new Map(
+    (guide.modules ?? []).map((m) => [m.moduleNumber, m])
+  );
+  for (const m of before.modules ?? []) {
+    if (!afterModules.has(m.moduleNumber)) {
+      guide.modules = [...(guide.modules ?? []), JSON.parse(JSON.stringify(m))];
+      restored.push(`Module ${m.moduleNumber} (“${m.title}”)`);
+    }
+  }
+  guide.modules = (guide.modules ?? []).sort(
+    (a, b) => a.moduleNumber - b.moduleNumber
+  );
+
+  // Per-module content, matched by module number.
+  const beforeByNumber = new Map(
+    (before.modules ?? []).map((m) => [m.moduleNumber, m])
+  );
+  for (const m of guide.modules ?? []) {
+    const old = beforeByNumber.get(m.moduleNumber);
+    if (!old) continue;
+
+    const oldConcepts = new Set((old.concepts ?? []).map((c) => c.title));
+    const newConcepts = new Set((m.concepts ?? []).map((c) => c.title));
+    const missingConcepts = (old.concepts ?? []).filter(
+      (c) => !newConcepts.has(c.title)
+    );
+    if (missingConcepts.length > 0) {
+      m.concepts = [
+        ...(m.concepts ?? []),
+        ...missingConcepts.map((c) => JSON.parse(JSON.stringify(c))),
+      ];
+      restored.push(
+        `${missingConcepts.length} concept${missingConcepts.length === 1 ? "" : "s"} in Module ${m.moduleNumber}`
+      );
+    }
+
+    // Practice problems, matched within their concept group.
+    const oldGroups = new Map(
+      (old.practice ?? []).map((g) => [g.conceptTitle, g])
+    );
+    const newGroups = new Map(
+      (m.practice ?? []).map((g) => [g.conceptTitle, g])
+    );
+    for (const [title, oldGroup] of oldGroups) {
+      const newGroup = newGroups.get(title);
+      if (!newGroup) {
+        m.practice = [
+          ...(m.practice ?? []),
+          JSON.parse(JSON.stringify(oldGroup)),
+        ];
+        restored.push(
+          `${oldGroup.problems.length} practice question${oldGroup.problems.length === 1 ? "" : "s"} for “${title}”`
+        );
+        continue;
+      }
+      const seen = byText(newGroup.problems ?? []);
+      const missingProblems = (oldGroup.problems ?? []).filter(
+        (p) => p.question?.trim() && !seen.has(p.question.trim())
+      );
+      if (missingProblems.length > 0) {
+        newGroup.problems = [
+          ...(newGroup.problems ?? []),
+          ...missingProblems.map((p) => JSON.parse(JSON.stringify(p))),
+        ];
+        restored.push(
+          `${missingProblems.length} practice question${missingProblems.length === 1 ? "" : "s"} in Module ${m.moduleNumber}`
+        );
+      }
+    }
+
+    // Checkpoint questions, matched by question text.
+    if (old.checkpoint) {
+      const seen = byText(m.checkpoint?.questions ?? []);
+      const missingQs = (old.checkpoint.questions ?? []).filter(
+        (q) => q.question?.trim() && !seen.has(q.question.trim())
+      );
+      if (missingQs.length > 0) {
+        if (!m.checkpoint) m.checkpoint = { questions: [] };
+        m.checkpoint.questions = [
+          ...(m.checkpoint.questions ?? []),
+          ...missingQs.map((q) => JSON.parse(JSON.stringify(q))),
+        ];
+        restored.push(
+          `${missingQs.length} checkpoint question${missingQs.length === 1 ? "" : "s"} in Module ${m.moduleNumber}`
+        );
+      }
+    }
+  }
+
+  // Guide-level quiz + final review, matched by question text.
+  const restoreQuestions = (
+    beforeQs: { question: string }[] | undefined,
+    afterQs: { question: string }[] | undefined,
+    label: string
+  ): { question: string }[] => {
+    const seen = byText(afterQs ?? []);
+    const missing = (beforeQs ?? []).filter(
+      (q) => q.question?.trim() && !seen.has(q.question.trim())
+    );
+    if (missing.length > 0) {
+      restored.push(
+        `${missing.length} ${label} question${missing.length === 1 ? "" : "s"}`
+      );
+      return [
+        ...(afterQs ?? []),
+        ...missing.map((q) => JSON.parse(JSON.stringify(q))),
+      ];
+    }
+    return (afterQs ?? []) as { question: string }[];
+  };
+  if (before.quiz && before.quiz.length > 0) {
+    guide.quiz = restoreQuestions(
+      before.quiz,
+      guide.quiz,
+      "practice quiz"
+    ) as GuideJson["quiz"];
+  }
+  if (before.finalReview) {
+    const qs = restoreQuestions(
+      before.finalReview.questions,
+      guide.finalReview?.questions,
+      "final review"
+    );
+    if (!guide.finalReview) guide.finalReview = { questions: [] };
+    guide.finalReview.questions = qs as NonNullable<
+      GuideJson["finalReview"]
+    >["questions"];
+  }
+
+  // Finishing sections — restore dropped items by value.
+  const restoreStrings = (
+    beforeItems: string[] | undefined,
+    afterItems: string[] | undefined,
+    label: string
+  ): string[] => {
+    const seen = new Set((afterItems ?? []).map((s) => s.trim()));
+    const missing = (beforeItems ?? []).filter(
+      (s) => s.trim() && !seen.has(s.trim())
+    );
+    if (missing.length > 0) {
+      restored.push(`${missing.length} ${label}`);
+    }
+    return [...(afterItems ?? []), ...missing];
+  };
+  if (before.objectives?.length) {
+    guide.objectives = restoreStrings(
+      before.objectives,
+      guide.objectives,
+      "learning objectives"
+    );
+  }
+  if (before.realWorldApplications?.length) {
+    guide.realWorldApplications = restoreStrings(
+      before.realWorldApplications,
+      guide.realWorldApplications,
+      "real-world applications"
+    );
+  }
+  if (before.faq?.length) {
+    const seen = new Set(
+      (guide.faq ?? []).map((f) => (f.question ?? "").trim())
+    );
+    const missing = before.faq.filter(
+      (f) => f.question?.trim() && !seen.has(f.question.trim())
+    );
+    if (missing.length > 0) {
+      guide.faq = [
+        ...(guide.faq ?? []),
+        ...missing.map((f) => JSON.parse(JSON.stringify(f))),
+      ];
+      restored.push(`${missing.length} FAQ items`);
+    }
+  }
+  if (before.keyTerms?.length) {
+    const seen = new Set((guide.keyTerms ?? []).map((t) => t.term));
+    const missing = before.keyTerms.filter((t) => !seen.has(t.term));
+    if (missing.length > 0) {
+      guide.keyTerms = [
+        ...(guide.keyTerms ?? []),
+        ...missing.map((t) => JSON.parse(JSON.stringify(t))),
+      ];
+      restored.push(`${missing.length} glossary terms`);
+    }
+  }
+
+  return { guide, restored };
+}
 
 /**
  * Builder Bot — pure guide-diff logic (no AI, no Supabase, no React).
@@ -199,8 +429,16 @@ export function diffGuideEdit(
   }
 
   const destructive = lost.length > 0;
+  // Added vs removed, grouped: what was added comes first, then what
+  // was removed, then rewrites — so the student sees at a glance
+  // whether an edit was purely additive or took something away.
+  const added = changes.filter((c) => c.startsWith("Added"));
+  const removed = changes.filter((c) => c.startsWith("Removed"));
+  const other = changes.filter(
+    (c) => !c.startsWith("Added") && !c.startsWith("Removed")
+  );
   return {
-    changes,
+    changes: [...added, ...removed, ...other],
     destructive,
     destructiveDetail: destructive
       ? `This edit would remove ${lost.join(", ")}.`

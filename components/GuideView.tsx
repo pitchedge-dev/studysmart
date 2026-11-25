@@ -49,6 +49,7 @@ import GuideVideos from "./GuideVideos";
 import GuideNavBar, { type GuideNavSection } from "./GuideNavBar";
 import GivenResources from "./GivenResources";
 import type { GivenResource } from "@/lib/guideSchema";
+import WhyWrongList, { type WhyWrongEntryLike } from "./WhyWrongList";
 import PreTest from "./PreTest";
 import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
@@ -66,6 +67,8 @@ type QuizQuestion = {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  /** One entry per wrong option, saying why it is wrong. */
+  whyWrong?: WhyWrongEntryLike[];
 };
 
 type TocEntry = {
@@ -1077,6 +1080,28 @@ export default function GuideView({
                         <strong className="font-bold text-ink-800">Example:</strong>{" "}
                         {concept.example}
                       </p>
+                      {concept.workedExample &&
+                        concept.workedExample.steps.length >= 2 && (
+                          <div className="mt-3 rounded-xl bg-sky-50/80 px-3.5 py-3 ring-1 ring-inset ring-sky-100">
+                            <p className="text-sm font-bold text-sky-900">
+                              Worked example
+                            </p>
+                            <p className="mt-1 text-sm leading-relaxed text-ink-700">
+                              {concept.workedExample.problem}
+                            </p>
+                            <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-relaxed text-ink-600">
+                              {concept.workedExample.steps.map((step, si) => (
+                                <li key={si}>{step}</li>
+                              ))}
+                            </ol>
+                            <p className="mt-2 text-sm leading-relaxed text-ink-700">
+                              <strong className="font-bold text-ink-800">
+                                Answer:
+                              </strong>{" "}
+                              {concept.workedExample.answer}
+                            </p>
+                          </div>
+                        )}
                       {concept.explanation && (
                         <p className="mt-3 text-sm leading-relaxed text-ink-600">
                           <strong className="font-bold text-ink-800">How it works:</strong>{" "}
@@ -1337,6 +1362,7 @@ export default function GuideView({
               guide copy — never from another user's data, and never from
               a published or shared copy. */}
           <PersonalizedPractice
+            guideKey={guideKey}
             guideTitle={result.guideTitle ?? "Study guide"}
             educationLevel={meta?.educationLevel ?? ""}
             weak={guideErrors.weak}
@@ -1445,6 +1471,10 @@ export default function GuideView({
                             <p>
                               <strong>Explanation:</strong> {q.explanation}
                             </p>
+                            <WhyWrongList
+                              whyWrong={q.whyWrong}
+                              correctAnswer={q.correctAnswer}
+                            />
                             {picked !== q.correctAnswer && (
                               <button
                                 type="button"

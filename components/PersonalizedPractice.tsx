@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Crosshair,
@@ -15,6 +15,12 @@ import {
 } from "lucide-react";
 import type { ErrorAnswerInput, GuideErrorRecord } from "@/lib/errorTracking";
 import { masteryLevel } from "@/lib/mastery";
+import {
+  clearPractice,
+  loadPractice,
+  savePractice,
+} from "@/lib/personalizedPracticeStore";
+import WhyWrongList, { type WhyWrongEntryLike } from "./WhyWrongList";
 
 export type PersonalizedQuestion = {
   conceptTitle: string;
@@ -22,6 +28,8 @@ export type PersonalizedQuestion = {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  /** One entry per wrong option, saying why it is wrong. */
+  whyWrong?: WhyWrongEntryLike[];
   /** Bloom's level this question targets — matched to the concept's
    *  mastery (Recall for new/weak concepts, Apply/Analyse as it is
    *  mastered). Set by the generator; older responses omit it. */
@@ -40,6 +48,7 @@ export type PersonalizedQuestion = {
  * in a row.
  */
 export default function PersonalizedPractice({
+  guideKey,
   guideTitle,
   educationLevel,
   weak,
@@ -48,6 +57,12 @@ export default function PersonalizedPractice({
   onAnswer,
   onClearErrors,
 }: {
+  /** The guide-copy key (`guide:<id>` or `local:<hash>`) — the same
+   *  key the error records use. Generated questions are stored under
+   *  it, so the home-page guide view and the dedicated /guide/[id]
+   *  page render the SAME generated set. Null means no stable key
+   *  (questions stay in memory for this view only). */
+  guideKey?: string | null;
   guideTitle: string;
   educationLevel: string;
   weak: GuideErrorRecord[];
@@ -62,11 +77,35 @@ export default function PersonalizedPractice({
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
+  // Load the stored set for this guide copy, so both views render the
+  // same generated practice. Loaded unconditionally — the weak list
+  // may still be loading from the account when this mounts, so the
+  // filter to still-weak concepts happens at render time, never here
+  // (filtering here could delete a good set before the records load).
+  useEffect(() => {
+    if (!guideKey) return;
+    const stored = loadPractice(guideKey);
+    if (!stored) return;
+    setQuestions(stored.questions);
+    setAnswers(stored.answers);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideKey]);
+
   if (weak.length === 0 && mastered.length === 0) return null;
 
-  const answeredCount = Object.keys(answers).length;
+  const weakTitles = new Set(weak.map((w) => w.conceptTitle));
+  // Only questions for concepts that are still weak are shown — a
+  // mastered concept's practice has served its purpose. Indices are
+  // kept (answers are keyed by them), so hidden questions are skipped
+  // in the render loop rather than filtered out of the array.
+  const visibleCount = (questions ?? []).filter((q) =>
+    weakTitles.has(q.conceptTitle)
+  ).length;
+  const answeredCount = (questions ?? []).filter(
+    (q, i) => weakTitles.has(q.conceptTitle) && answers[i] !== undefined
+  ).length;
   const correctCount = (questions ?? []).filter(
-    (q, i) => answers[i] === q.correctAnswer
+    (q, i) => weakTitles.has(q.conceptTitle) && answers[i] === q.correctAnswer
   ).length;
 
   async function generatePractice() {
@@ -100,7 +139,12 @@ export default function PersonalizedPractice({
             ? `${data.error || "Failed to generate personalized practice."} (${data.detail})`
             : data.error || "Failed to generate personalized practice."
         );
-      setQuestions(data.questions as PersonalizedQuestion[]);
+      const fresh = data.questions as PersonalizedQuestion[];
+      setQuestions(fresh);
+      setAnswers({});
+      // Stored under the guide key, so the other guide view renders
+      // this same set instead of asking to generate again.
+      savePractice(guideKey, fresh, {});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -111,7 +155,11 @@ export default function PersonalizedPractice({
   function pick(i: number, opt: string) {
     const q = questions?.[i];
     if (!q || answers[i]) return;
-    setAnswers((prev) => ({ ...prev, [i]: opt }));
+    const next = { ...answers, [i]: opt };
+    setAnswers(next);
+    // Persisted with the questions, so the other view shows this
+    // question as answered — answering it twice must not count twice.
+    savePractice(guideKey, questions ?? [], next);
     onAnswer({
       source: "personalized",
       moduleTitle:
@@ -152,6 +200,7 @@ export default function PersonalizedPractice({
           onClick={() => {
             if (confirmClear) {
               onClearErrors();
+              clearPractice(guideKey);
               setQuestions(null);
               setAnswers({});
               setConfirmClear(false);
@@ -234,7 +283,7 @@ export default function PersonalizedPractice({
         </div>
       )}
 
-      {questions && questions.length > 0 && (
+      {questions && visibleCount > 0 && (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-bold text-ink-900">
@@ -247,6 +296,7 @@ export default function PersonalizedPractice({
             )}
           </div>
           {questions.map((q, i) => {
+            if (!weakTitles.has(q.conceptTitle)) return null;
             const picked = answers[i];
             return (
               <div
@@ -298,6 +348,10 @@ export default function PersonalizedPractice({
                     <p>
                       <strong>Explanation:</strong> {q.explanation}
                     </p>
+                    <WhyWrongList
+                      whyWrong={q.whyWrong}
+                      correctAnswer={q.correctAnswer}
+                    />
                     {picked !== q.correctAnswer && (
                       <p className="mt-1 text-sm font-semibold text-ink-600">
                         <Crosshair className="mr-1 inline h-4 w-4" />
@@ -317,7 +371,7 @@ export default function PersonalizedPractice({
               </div>
             );
           })}
-          {answeredCount === questions.length && (
+          {answeredCount === visibleCount && visibleCount > 0 && (
             <button
               type="button"
               onClick={generatePractice}

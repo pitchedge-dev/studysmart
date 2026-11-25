@@ -26,6 +26,7 @@ import {
 } from "@/lib/review";
 import EmptyState from "./EmptyState";
 import type { PersonalizedQuestion } from "./PersonalizedPractice";
+import WhyWrongList from "./WhyWrongList";
 
 /**
  * Interleave questions across concepts (Rohrer et al.): arrange them so
@@ -513,6 +514,10 @@ export default function ReviewQueue({
               <p>
                 <strong>Explanation:</strong> {q.explanation}
               </p>
+              <WhyWrongList
+                whyWrong={q.whyWrong}
+                correctAnswer={q.correctAnswer}
+              />
               {picked === q.correctAnswer && (
                 <div className="mt-3">
                   <p className="text-sm font-bold text-ink-900">

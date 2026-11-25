@@ -33,6 +33,8 @@ export type DiagnosticQuestion = {
   correctAnswer: string;
   explanation: string;
   conceptTitle: string;
+  /** One entry per wrong option, saying why it is wrong. */
+  whyWrong?: { option: string; reason: string }[];
 };
 
 export type PreTestResult = {
@@ -51,7 +53,13 @@ function norm(s: string): string {
 }
 
 function usable(
-  q: { question: string; options?: string[]; correctAnswer: string; explanation: string },
+  q: {
+    question: string;
+    options?: string[];
+    correctAnswer: string;
+    explanation: string;
+    whyWrong?: { option: string; reason: string }[];
+  },
   conceptTitle: string
 ): DiagnosticQuestion | null {
   const options = (q.options ?? []).map((o) => String(o).trim()).filter(Boolean);
@@ -63,6 +71,14 @@ function usable(
     correctAnswer: q.correctAnswer.trim(),
     explanation: q.explanation?.trim() ?? "",
     conceptTitle,
+    whyWrong: (q.whyWrong ?? []).filter(
+      (w) =>
+        typeof w?.option === "string" &&
+        options.includes(w.option) &&
+        w.option !== q.correctAnswer.trim() &&
+        typeof w?.reason === "string" &&
+        w.reason.trim().length > 0
+    ),
   };
 }
 

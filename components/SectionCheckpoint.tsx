@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { CheckCircle2, Trophy, XCircle } from "lucide-react";
 import type { CheckpointQuestion } from "./TargetedPractice";
 import type { ErrorAnswerInput } from "@/lib/errorTracking";
+import WhyWrongList from "./WhyWrongList";
 
 export default function SectionCheckpoint({
   moduleTitle,
@@ -144,6 +145,10 @@ export default function SectionCheckpoint({
           <p>
             <strong>Why this answer works:</strong> {question.explanation}
           </p>
+          <WhyWrongList
+            whyWrong={question.whyWrong}
+            correctAnswer={question.correctAnswer}
+          />
           <button
             type="button"
             onClick={next}

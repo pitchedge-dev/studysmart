@@ -19,6 +19,7 @@ import {
   type DiagnosticQuestion,
   type PreTestState,
 } from "@/lib/pretest";
+import WhyWrongList from "./WhyWrongList";
 
 /**
  * "Test yourself first" — a short diagnostic before studying.
@@ -187,6 +188,10 @@ export default function PreTest({
                 <strong>Answer:</strong> {q.correctAnswer}
                 {q.explanation ? ` — ${q.explanation}` : ""}
               </p>
+              <WhyWrongList
+                whyWrong={q.whyWrong}
+                correctAnswer={q.correctAnswer}
+              />
               <button
                 type="button"
                 onClick={next}

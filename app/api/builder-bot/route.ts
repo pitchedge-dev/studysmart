@@ -4,7 +4,8 @@ import {
   BuilderBotEditResultSchema,
   type GuideJson,
 } from "@/lib/guideSchema";
-import { diffGuideEdit } from "@/lib/builderBot";
+import { diffGuideEdit, isAdditiveRequest, restoreRemovedContent } from "@/lib/builderBot";
+import { sanitizeGuide } from "@/lib/guideQuality";
 import {
   getModelsFor,
   isOverloadedError,
@@ -111,8 +112,9 @@ YOUR JOB: return the COMPLETE updated guide with the requested change applied. E
 
 RULES — follow all of them:
 1. Make ONLY the change the student asked for. Keep everything else — module numbers, concept titles, wording — exactly as it is unless the request says to change it.
+1b. ADDITIVE BY DEFAULT: when the student asks to ADD something — more questions, a new concept, another module, extra examples — ONLY add. Never remove, shorten, replace, or drop any existing content to make room for the addition. Every existing module, concept, practice problem, quiz question, checkpoint question, and final review question stays exactly as it is unless the student explicitly asks to remove or replace it. If the guide is getting long, add the new content anyway and say so in your summary — never silently delete existing work to fit.
 2. Base ALL new content on the guide's own material and topic. Do not invent facts, and NEVER invent a study, citation, statistic, date, or quote that is not already in the guide. If the request needs facts the guide does not contain, add only what the guide supports and say plainly in your summary what is missing.
-3. Keep every correct answer matching one of its options, and keep practice problems tied to the concept they belong to.
+3. Keep every correct answer matching one of its options, and keep practice problems tied to the concept they belong to. For every multiple-choice question you add, explain why the correct answer is right and why EACH wrong option is wrong (one whyWrong entry per wrong option).
 4. If the request is vague or would delete most of the guide, do the smallest sensible version of it and say so in your summary.
 5. If the student asks for something you cannot do (for example, adding a whole new subject that is not in the guide), say so in your summary and return the guide unchanged.
 
@@ -140,12 +142,31 @@ Return the summary, the change list, and the complete updated guide.`;
           abortSignal: AbortSignal.timeout(55000),
         });
         const updatedGuide = object.updatedGuide as unknown as GuideJson;
-        // The change list the user sees comes from the real before/after
-        // diff — never from the model's self-report.
-        const diff = diffGuideEdit(guide, updatedGuide);
+        // Additive requests must not silently drop existing content:
+        // if the model removed anything while adding, put it back
+        // before the diff is computed, so what the student sees — and
+        // what gets saved — is purely additive. The change list below
+        // is then computed from the final guide, not the model's
+        // self-report and not the pre-restore draft.
+        let finalGuide = updatedGuide;
+        let restoredNote: string | null = null;
+        if (isAdditiveRequest(instruction)) {
+          const restored = restoreRemovedContent(guide, updatedGuide);
+          if (restored.restored.length > 0) {
+            finalGuide = restored.guide;
+            restoredNote = `Nothing was removed — kept ${restored.restored.join(", ")}.`;
+          }
+        }
+        // Clean the edited guide the same way a fresh generation is
+        // cleaned: no refusal / blank / broken content can sneak in
+        // through an edit.
+        finalGuide = sanitizeGuide(finalGuide);
+        const diff = diffGuideEdit(guide, finalGuide);
         return NextResponse.json({
-          updatedGuide,
-          summary: object.summary,
+          updatedGuide: finalGuide,
+          summary: restoredNote
+            ? `${object.summary} ${restoredNote}`
+            : object.summary,
           changes: diff.changes,
           destructive: diff.destructive,
           destructiveDetail: diff.destructiveDetail ?? null,

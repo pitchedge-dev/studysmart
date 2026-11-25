@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Sparkles, XCircle } from "lucide-react";
 import type { ErrorAnswerInput } from "@/lib/errorTracking";
+import WhyWrongList, { type WhyWrongEntryLike } from "./WhyWrongList";
 
 export type PracticeProblem = {
   type?: string;
@@ -10,6 +11,8 @@ export type PracticeProblem = {
   correctAnswer: string;
   options?: string[];
   explanation: string;
+  /** One entry per wrong option, saying why it is wrong. */
+  whyWrong?: WhyWrongEntryLike[];
 };
 
 export type PracticeGroup = {
@@ -28,6 +31,8 @@ export type CheckpointQuestion = {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  /** One entry per wrong option, saying why it is wrong. */
+  whyWrong?: WhyWrongEntryLike[];
 };
 
 export type StudyModule = {
@@ -41,6 +46,12 @@ export type StudyModule = {
     title: string;
     formulaOrDefinition: string;
     example: string;
+    /** Step-by-step worked example with real numbers or a concrete case. */
+    workedExample?: {
+      problem: string;
+      steps: string[];
+      answer: string;
+    };
     translation?: string;
     category?: string;
     pronunciation?: string;
@@ -290,6 +301,10 @@ export default function TargetedPractice({
                         <p className="mt-1">
                           <strong>Explanation:</strong> {problem.explanation}
                         </p>
+                        <WhyWrongList
+                          whyWrong={problem.whyWrong}
+                          correctAnswer={problem.correctAnswer}
+                        />
                         {!answer.correct && (
                           <button
                             type="button"

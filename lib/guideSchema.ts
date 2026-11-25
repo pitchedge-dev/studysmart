@@ -16,6 +16,25 @@ import { z } from "zod";
  * fields — only the array bounds are wider.
  */
 
+/**
+ * Why one wrong option is wrong — one entry per wrong option of a
+ * multiple-choice question. The option text must match the option
+ * exactly, so the UI can show the reason next to that option. This is
+ * what makes an explanation teach instead of just confirming the
+ * right answer: every distractor comes from a real common mistake,
+ * and the student sees why that mistake fails.
+ */
+export const WhyWrongSchema = z.object({
+  option: z
+    .string()
+    .describe("The exact text of one WRONG option, matching one of the question's options."),
+  reason: z
+    .string()
+    .describe("One sentence saying why this option is wrong — the common mistake behind it, and what goes wrong if you pick it."),
+});
+
+export type WhyWrongEntry = z.infer<typeof WhyWrongSchema>;
+
 export const QuizQuestionSchema = z.object({
   question: z.string().describe("The quiz question text."),
   options: z
@@ -29,7 +48,32 @@ export const QuizQuestionSchema = z.object({
   explanation: z
     .string()
     .describe("A detailed explanation of why the correct answer is right."),
+  whyWrong: z
+    .array(WhyWrongSchema)
+    .optional()
+    .describe(
+      "REQUIRED for every multiple-choice question: one entry for EACH wrong option, saying why that option is wrong. Never explain only the correct answer — a student who picked a distractor needs to see why their pick fails."
+    ),
 });
+
+/** A step-by-step worked example with real numbers or a concrete case:
+ *  the problem, each working step in order, and the final answer.
+ *  One-line examples do not teach — the steps are the teaching. */
+export const WorkedExampleSchema = z.object({
+  problem: z
+    .string()
+    .describe("The worked-example problem — a concrete case with real numbers, dates, values, or a specific situation from the material."),
+  steps: z
+    .array(z.string())
+    .min(2)
+    .max(6)
+    .describe("The working, step by step, in order — each step shows one calculation, decision, or piece of reasoning. At least 2 steps."),
+  answer: z
+    .string()
+    .describe("The final answer or outcome of the worked example."),
+});
+
+export type WorkedExample = z.infer<typeof WorkedExampleSchema>;
 
 export const ConceptSchema = z.object({
   kind: z
@@ -51,6 +95,9 @@ export const ConceptSchema = z.object({
   example: z
     .string()
     .describe("One worked example for this concept, taken from the supplied material."),
+  workedExample: WorkedExampleSchema.optional().describe(
+    "A step-by-step worked example for this concept, with real numbers or a concrete case from the material: the problem, each working step in order, and the final answer. REQUIRED for every concept where numbers, formulas, processes, timelines, or worked cases apply — for example science, maths, history, and anything with a procedure. For a pure vocabulary definition with genuinely no worked case, omit it."
+  ),
   translation: z
     .string()
     .optional()
@@ -115,6 +162,12 @@ export const PracticeProblemSchema = z.object({
     .describe(
       "A step-by-step explanation of how to reach the correct answer."
     ),
+  whyWrong: z
+    .array(WhyWrongSchema)
+    .optional()
+    .describe(
+      "For multiple-choice problems: one entry for EACH wrong option, saying why that option is wrong. Omit for short-answer problems (no options). Never explain only the correct answer."
+    ),
 });
 
 export const PracticeGroupSchema = z.object({
@@ -146,7 +199,7 @@ export const CheckpointSchema = z.object({
     .min(5)
     .max(10)
     .describe(
-      "A mastery quiz for this module — aim for 10 questions. Each question has answer options, the correct answer, and an explanation of why the correct answer works."
+      "A mastery quiz for this module — aim for 10 questions. Each question has answer options, the correct answer, an explanation of why the correct answer works, and one whyWrong entry for EACH wrong option."
     ),
 });
 

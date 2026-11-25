@@ -82,6 +82,7 @@ import {
 } from "@/lib/arenaExport";
 import type { GivenResource } from "@/lib/guideSchema";
 import PreTest from "@/components/PreTest";
+import WhyWrongList, { type WhyWrongEntryLike } from "@/components/WhyWrongList";
 import ProgressDashboard from "@/components/ProgressDashboard";
 import GuideNavBar, { type GuideNavSection } from "@/components/GuideNavBar";
 import FeedbackModal from "@/components/FeedbackModal";
@@ -117,6 +118,8 @@ type QuizQuestion = {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  /** One entry per wrong option, saying why it is wrong. */
+  whyWrong?: WhyWrongEntryLike[];
 };
 
 export type GenerateResult = {
@@ -2061,6 +2064,28 @@ export default function Home() {
                               </strong>{" "}
                               {concept.example}
                             </p>
+                            {concept.workedExample &&
+                              concept.workedExample.steps.length >= 2 && (
+                                <div className="mt-3 rounded-xl bg-sky-50/80 px-3.5 py-3 ring-1 ring-inset ring-sky-100">
+                                  <p className="text-sm font-bold text-sky-900">
+                                    Worked example
+                                  </p>
+                                  <p className="mt-1 text-sm leading-relaxed text-ink-700">
+                                    {concept.workedExample.problem}
+                                  </p>
+                                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-relaxed text-ink-600">
+                                    {concept.workedExample.steps.map((step, si) => (
+                                      <li key={si}>{step}</li>
+                                    ))}
+                                  </ol>
+                                  <p className="mt-2 text-sm leading-relaxed text-ink-700">
+                                    <strong className="font-bold text-ink-800">
+                                      Answer:
+                                    </strong>{" "}
+                                    {concept.workedExample.answer}
+                                  </p>
+                                </div>
+                              )}
                             {concept.explanation && (
                               <p className="mt-3 text-sm leading-relaxed text-ink-600">
                                 <strong className="font-bold text-ink-800">
@@ -2259,6 +2284,7 @@ export default function Home() {
                   guide copy — never from another user's data, and never
                   from a published or shared copy. */}
               <PersonalizedPractice
+                guideKey={currentGuideId}
                 guideTitle={result.guideTitle ?? "Study guide"}
                 educationLevel={educationLevel}
                 weak={guideErrors.weak}
@@ -2516,6 +2542,10 @@ export default function Home() {
                         <p>
                           <strong>Explanation:</strong> {q.explanation}
                         </p>
+                        <WhyWrongList
+                          whyWrong={q.whyWrong}
+                          correctAnswer={q.correctAnswer}
+                        />
                         {picked !== q.correctAnswer && (
                           <button
                             type="button"
