@@ -35,6 +35,10 @@ export type ActivityDay = {
   sectionsCompleted: number;
   conceptsMastered: number;
   arenaGames: number;
+  /** Finished Battle Arena games with accuracy >= 70% — the app's own
+   *  win line (BattleArena plays the win fanfare and confetti at >= 0.7).
+   *  Local only, like focusSessions (no column in study_activity). */
+  arenaWins: number;
   /** Completed 25-minute focus sessions (Pomodoro). Local only — not a
    *  column in the study_activity table, so it is never sent to Supabase
    *  (see syncDayToSupabase). */
@@ -79,6 +83,7 @@ export function emptyDay(date: string): ActivityDay {
     sectionsCompleted: 0,
     conceptsMastered: 0,
     arenaGames: 0,
+    arenaWins: 0,
     focusSessions: 0,
   };
 }
@@ -192,7 +197,9 @@ async function loadDaysFromSupabase(
         sectionsCompleted: Number(row.sections_completed ?? 0),
         conceptsMastered: Number(row.concepts_mastered ?? 0),
         arenaGames: Number(row.arena_games ?? 0),
-        // focusSessions is local-only; the table has no such column.
+        // arenaWins + focusSessions are local-only; the table has no
+        // such columns.
+        arenaWins: 0,
         focusSessions: 0,
       };
     }
@@ -255,6 +262,9 @@ export type ActivityApi = {
   /** Mark one finished Battle Arena game (no question counts — those
    *  are recorded per answer, so this never double-counts). */
   recordArenaPlayed: () => void;
+  /** Mark one finished Battle Arena game won at >= 70% accuracy (the
+   *  app's own win line — see BattleArena's win fanfare / confetti). */
+  recordArenaWin: () => void;
   /** A completed 25-minute focus session (+25 XP, counts as a study day). */
   recordFocusSession: () => void;
   saveLastGuide: (guide: LastGuide) => void;
@@ -301,6 +311,7 @@ export function useActivity(userId: string | null): ActivityApi {
                 sectionsCompleted: Math.max(l.sectionsCompleted, r.sectionsCompleted),
                 conceptsMastered: Math.max(l.conceptsMastered, r.conceptsMastered),
                 arenaGames: Math.max(l.arenaGames, r.arenaGames),
+                arenaWins: Math.max(l.arenaWins ?? 0, r.arenaWins ?? 0),
                 focusSessions: Math.max(l.focusSessions ?? 0, r.focusSessions ?? 0),
               }
             : r;
@@ -396,6 +407,10 @@ export function useActivity(userId: string | null): ActivityApi {
     mutate((day) => ({ ...day, arenaGames: day.arenaGames + 1 }));
   }, [mutate]);
 
+  const recordArenaWin = useCallback(() => {
+    mutate((day) => ({ ...day, arenaWins: (day.arenaWins ?? 0) + 1 }));
+  }, [mutate]);
+
   const saveLastGuide = useCallback((guide: LastGuide) => {
     setState((prev) => {
       const next = { ...prev, lastGuide: guide };
@@ -468,6 +483,7 @@ export function useActivity(userId: string | null): ActivityApi {
     recordConceptMastered,
     recordArenaGame,
     recordArenaPlayed,
+    recordArenaWin,
     recordFocusSession,
     saveLastGuide,
     clearLastGuide,

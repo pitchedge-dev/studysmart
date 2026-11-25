@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
@@ -26,6 +26,7 @@ import {
   Sparkles,
   Sun,
   Swords,
+  Trophy,
   Upload,
   User,
   Users,
@@ -48,6 +49,8 @@ import {
   type ErrorAnswerInput,
 } from "@/lib/errorTracking";
 import { useActivity } from "@/lib/activity";
+import { computeAchievementStats, useAchievements } from "@/lib/achievements";
+import Achievements from "@/components/Achievements";
 import { dueCount as dueCountOf, loadAllErrors } from "@/lib/review";
 import { getTheme, toggleTheme } from "@/lib/theme";
 import {
@@ -135,7 +138,7 @@ export type GenerateResult = {
   givenResources?: GivenResource[];
 };
 
-type Section = "generate" | "my-guides" | "browse" | "arena" | "review" | "friends";
+type Section = "generate" | "my-guides" | "browse" | "arena" | "review" | "friends" | "achievements";
 type ResultView = "guide" | "quiz";
 
 /** Keyboard shortcuts shown by the `?` help overlay — every one of
@@ -149,6 +152,7 @@ const SHORTCUTS: Array<{ keys: string; description: string }> = [
   { keys: "G then A", description: "Go to Battle Arena" },
   { keys: "G then R", description: "Go to Review queue" },
   { keys: "G then F", description: "Go to Friends" },
+  { keys: "G then C", description: "Go to Achievements" },
   { keys: "1–4", description: "Answer a Review question (in the Review queue)" },
   { keys: "Enter", description: "Continue to the next Review question" },
 ];
@@ -161,6 +165,7 @@ const NAV_LINKS: { id: Section; label: string; icon: typeof Wand2 }[] = [
   { id: "arena", label: "Battle Arena", icon: Swords },
   { id: "review", label: "Review", icon: RotateCcw },
   { id: "friends", label: "Friends", icon: Users },
+  { id: "achievements", label: "Achievements", icon: Trophy },
 ];
 
 type UploadedFile = {
@@ -230,6 +235,20 @@ export default function Home() {
 
   // Streaks + XP + daily goal, from real activity only (0 for a new user).
   const activity = useActivity(user?.id ?? null);
+
+  // Achievements — evaluated from real activity only (see
+  // lib/achievements.ts). Study hours come from measured focus-timer
+  // sessions; nothing here is granted for opening the app.
+  const achievementStats = useMemo(
+    () =>
+      computeAchievementStats(
+        activity.state.days,
+        activity.streak,
+        activity.xp
+      ),
+    [activity.state.days, activity.streak, activity.xp]
+  );
+  const achievements = useAchievements(user?.id ?? null, achievementStats);
   const [darkMode, setDarkMode] = useState(false);
   const [celebration, setCelebration] = useState<string | null>(null);
   const [dueCount, setDueCount] = useState(0);
@@ -339,6 +358,7 @@ export default function Home() {
           a: "arena",
           r: "review",
           f: "friends",
+          c: "achievements",
         };
         const next = map[e.key.toLowerCase()];
         if (next) {
@@ -492,6 +512,7 @@ export default function Home() {
     { id: "go-arena", label: "Start Battle Arena", group: "Navigate", hint: "G A", run: () => goToSection("arena") },
     { id: "go-review", label: "Open Review queue", group: "Navigate", hint: "G R", run: () => goToSection("review") },
     { id: "go-friends", label: "Go to Friends", group: "Navigate", hint: "G F", run: () => goToSection("friends") },
+    { id: "go-achievements", label: "View Achievements", group: "Navigate", hint: "G C", run: () => goToSection("achievements") },
     ...(activity.state.lastGuide?.guideId
       ? [
           {
@@ -2485,7 +2506,13 @@ export default function Home() {
             initialGameKey={savedGame?.key}
             onAnswer={activity.recordQuestion}
             onReviewMisses={handleArenaMisses}
-            onGameFinished={() => activity.recordArenaPlayed()}
+            onGameFinished={(correct, answered) => {
+              activity.recordArenaPlayed();
+              // A win is a finished game at >= 70% accuracy — the app's
+              // own win line (see lib/achievements.ts ARENA_WIN_ACCURACY).
+              if (answered > 0 && correct / answered >= 0.7)
+                activity.recordArenaWin();
+            }}
           />
         </section>
       )}
@@ -2544,6 +2571,21 @@ export default function Home() {
               onAction={() => setAuthOpen(true)}
             />
           )}
+        </section>
+      )}
+
+      {/* Achievements — real-activity milestones + certificates */}
+      {section === "achievements" && (
+        <section className="mt-8 animate-fade-up">
+          <Achievements
+            stats={achievementStats}
+            earned={achievements.earned}
+            newlyUnlocked={achievements.newlyUnlocked}
+            onDismissNew={achievements.dismissNewlyUnlocked}
+            displayName={
+              profile?.display_name ?? "StudySMART Learner"
+            }
+          />
         </section>
       )}
 
