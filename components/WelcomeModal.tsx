@@ -14,9 +14,10 @@ import MeetYourBots from "./MeetYourBots";
  * "How it is powered", stated honestly from lib/providers.ts: every guide
  * is generated fresh by AI the moment you ask — nothing here is premade.
  * Google Gemini answers first, and Groq, OpenRouter, Cerebras, NVIDIA,
- * SambaNova, Cohere, Cloudflare, DeepSeek and Novita are wired in as
- * free backup providers, plus Pollinations — which needs no key at all
- * and is always tried last as a safety net — so if one is busy or out
+ * SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API,
+ * Hugging Face, Moonshot, Zhipu, Qwen and the Vercel AI Gateway are wired
+ * in as free backup providers, plus Pollinations — which needs no key at
+ * all and is always tried last as a safety net — so if one is busy or out
  * of free calls another one takes over. (Which of them actually have
  * keys set is an env-var matter — the popup claims the wiring, not
  * the keys.)
@@ -116,10 +117,12 @@ export default function WelcomeModal({
               Every guide is generated fresh by AI the moment you ask — nothing
               here is premade. Google Gemini answers first, and Groq,
               OpenRouter, Cerebras, NVIDIA, SambaNova, Cohere, Cloudflare,
-              DeepSeek and Novita are wired in as free backup providers,
-              plus Pollinations — which needs no key at all and is always
-              tried last as a safety net. If one is busy or out of free
-              calls, another takes over automatically.
+              DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face,
+              Moonshot, Zhipu, Qwen and the Vercel AI Gateway are wired in
+              as free backup providers, plus Pollinations — which needs no
+              key at all and is always tried last as a safety net. If one
+              is busy or out of free calls, another takes over
+              automatically.
             </p>
           </div>
 
