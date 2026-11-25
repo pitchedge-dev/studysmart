@@ -570,6 +570,10 @@ export type GuideErrorRow = {
   /** Spaced-repetition schedule (migration 0004). Null until set. */
   next_review_at?: string | null;
   review_interval_days?: number | null;
+  /** SM-2 scheduler state (migration 0008). Null on old rows — the
+   *  app falls back to the SM-2 defaults (ease 2.5, 0 reps). */
+  ease_factor?: number | null;
+  review_reps?: number | null;
   updated_at?: string;
 };
 
@@ -634,24 +638,35 @@ export async function upsertGuideErrors(
     last_explanation: r.last_explanation ?? null,
     next_review_at: r.next_review_at ?? null,
     review_interval_days: r.review_interval_days ?? null,
+    ease_factor: r.ease_factor ?? null,
+    review_reps: r.review_reps ?? null,
     updated_at: new Date().toISOString(),
   }));
   const { error } = await sb
     .from("guide_errors")
     .upsert(rows, { onConflict: "user_id,guide_key,concept_title" });
   if (!error) return true;
-  // The spaced-repetition columns come from migration 0004, which may
-  // not be applied live yet. If the upsert failed because those columns
-  // do not exist, retry without them — the errors still get saved.
+  // The spaced-repetition columns come from migrations 0004 (schedule)
+  // and 0008 (SM-2 ease/reps), which may not be applied live yet. If the
+  // upsert failed because those columns do not exist, retry without
+  // them — the errors still get saved.
   const missingColumn =
     error.code === "42703" ||
-    /next_review_at|review_interval_days/i.test(error.message);
+    /next_review_at|review_interval_days|ease_factor|review_reps/i.test(
+      error.message
+    );
   if (!missingColumn) {
     console.error("[supabase] save guide errors failed:", error.message);
     return false;
   }
   const legacyRows = rows.map(
-    ({ next_review_at: _n, review_interval_days: _i, ...rest }) => rest
+    ({
+      next_review_at: _n,
+      review_interval_days: _i,
+      ease_factor: _e,
+      review_reps: _r,
+      ...rest
+    }) => rest
   );
   const retry = await sb
     .from("guide_errors")

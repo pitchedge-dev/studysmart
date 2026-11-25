@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  SM2_QUALITY,
+  gradeForAnswer,
+  sm2Schedule,
+  sm2StateOf,
+} from "./review";
+import {
   deleteGuideErrors,
   listGuideErrors,
   upsertGuideErrors,
@@ -37,6 +43,11 @@ export type GuideErrorRecord = {
    *  a missing date means "due now". */
   nextReviewAt?: string;
   reviewIntervalDays?: number;
+  /** SM-2 scheduler state (migration 0008): easiness factor (starts
+   *  2.5, floor 1.3) and consecutive-pass count. Missing on old records
+   *  — they start at the SM-2 defaults, so nothing is lost. */
+  easeFactor?: number;
+  reviewReps?: number;
 };
 
 /** A concept counts as weak once missed and not yet mastered. */
@@ -78,12 +89,15 @@ export function masteredConcepts(
 }
 
 /** Fold one answered question into the per-concept records. Also
- *  advances the spaced-repetition schedule: wrong = due tomorrow,
- *  correct = next interval along 1 → 3 → 7 → 16 days. The 2-in-a-row
- *  mastery rule (MASTERY_STREAK) is unchanged. */
+ *  advances the SM-2 spaced-repetition schedule (lib/review.ts): the
+ *  grade is the student's own self-grade after a correct answer
+ *  (Hard / Good / Easy); without one, correct = Good and wrong = Again
+ *  (a lapse — due tomorrow, ladder restarts). The 2-in-a-row mastery
+ *  rule (MASTERY_STREAK) is unchanged. */
 export function applyAnswer(
   records: GuideErrorRecord[],
-  answer: ErrorAnswerInput
+  answer: ErrorAnswerInput,
+  grade?: "again" | "hard" | "good" | "easy"
 ): GuideErrorRecord[] {
   const conceptTitle = answer.conceptTitle.trim() || "Practice Quiz";
   const existing = records.find((r) => r.conceptTitle === conceptTitle);
@@ -99,15 +113,6 @@ export function applyAnswer(
   next.totalAttempts += 1;
   if (answer.correct) {
     next.correctStreak += 1;
-    // Advance the review interval: 1 → 3 → 7 → 16 days (stays at 16).
-    const intervals = [1, 3, 7, 16];
-    const current = next.reviewIntervalDays ?? 1;
-    const idx = intervals.indexOf(current);
-    const interval = intervals[Math.min((idx === -1 ? 1 : idx + 1), intervals.length - 1)];
-    next.reviewIntervalDays = interval;
-    const d = new Date();
-    d.setDate(d.getDate() + interval);
-    next.nextReviewAt = d.toISOString().slice(0, 10);
   } else {
     next.misses += 1;
     next.correctStreak = 0;
@@ -115,12 +120,16 @@ export function applyAnswer(
     next.lastPicked = answer.picked;
     next.lastCorrect = answer.correctAnswer;
     next.lastExplanation = answer.explanation;
-    // Wrong: due again tomorrow.
-    next.reviewIntervalDays = 1;
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    next.nextReviewAt = d.toISOString().slice(0, 10);
   }
+  // SM-2 step: the student's grade (or the correct/incorrect default)
+  // sets the next gap — easy concepts stretch further, hard ones come
+  // back sooner, a miss restarts the ladder at 1 day.
+  const quality = SM2_QUALITY[grade ?? gradeForAnswer(answer.correct)];
+  const scheduled = sm2Schedule(sm2StateOf(next), quality);
+  next.reviewReps = scheduled.state.reps;
+  next.easeFactor = scheduled.state.easeFactor;
+  next.reviewIntervalDays = scheduled.nextIntervalDays;
+  next.nextReviewAt = scheduled.nextReviewAt;
   if (!next.moduleTitle) next.moduleTitle = answer.moduleTitle;
   const rest = records.filter((r) => r.conceptTitle !== conceptTitle);
   return [...rest, next];
@@ -171,6 +180,8 @@ function toRow(
     last_explanation: r.lastExplanation ?? null,
     next_review_at: r.nextReviewAt ?? null,
     review_interval_days: r.reviewIntervalDays ?? null,
+    ease_factor: r.easeFactor ?? null,
+    review_reps: r.reviewReps ?? null,
   };
 }
 
@@ -187,6 +198,8 @@ function fromRow(row: GuideErrorRow): GuideErrorRecord {
     lastExplanation: row.last_explanation ?? undefined,
     nextReviewAt: row.next_review_at ?? undefined,
     reviewIntervalDays: row.review_interval_days ?? undefined,
+    easeFactor: row.ease_factor ?? undefined,
+    reviewReps: row.review_reps ?? undefined,
   };
 }
 

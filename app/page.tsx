@@ -26,6 +26,7 @@ import {
   Sparkles,
   Sun,
   Swords,
+  TrendingUp,
   Trophy,
   Upload,
   User,
@@ -76,6 +77,8 @@ import SectionCheckpoint from "@/components/SectionCheckpoint";
 import GuideVideos from "@/components/GuideVideos";
 import GivenResources from "@/components/GivenResources";
 import type { GivenResource } from "@/lib/guideSchema";
+import PreTest from "@/components/PreTest";
+import ProgressDashboard from "@/components/ProgressDashboard";
 import GuideNavBar, { type GuideNavSection } from "@/components/GuideNavBar";
 import FeedbackModal from "@/components/FeedbackModal";
 import WelcomeModal, { hasSeenWelcome } from "@/components/WelcomeModal";
@@ -138,7 +141,7 @@ export type GenerateResult = {
   givenResources?: GivenResource[];
 };
 
-type Section = "generate" | "my-guides" | "browse" | "arena" | "review" | "friends" | "achievements";
+type Section = "generate" | "my-guides" | "browse" | "arena" | "review" | "friends" | "achievements" | "progress";
 type ResultView = "guide" | "quiz";
 
 /** Keyboard shortcuts shown by the `?` help overlay — every one of
@@ -151,6 +154,7 @@ const SHORTCUTS: Array<{ keys: string; description: string }> = [
   { keys: "G then B", description: "Go to Browse" },
   { keys: "G then A", description: "Go to Battle Arena" },
   { keys: "G then R", description: "Go to Review queue" },
+  { keys: "G then P", description: "Go to My Progress" },
   { keys: "G then F", description: "Go to Friends" },
   { keys: "G then C", description: "Go to Achievements" },
   { keys: "1–4", description: "Answer a Review question (in the Review queue)" },
@@ -164,6 +168,7 @@ const NAV_LINKS: { id: Section; label: string; icon: typeof Wand2 }[] = [
   { id: "browse", label: "Browse", icon: Globe },
   { id: "arena", label: "Battle Arena", icon: Swords },
   { id: "review", label: "Review", icon: RotateCcw },
+  { id: "progress", label: "Progress", icon: TrendingUp },
   { id: "friends", label: "Friends", icon: Users },
   { id: "achievements", label: "Achievements", icon: Trophy },
 ];
@@ -357,6 +362,7 @@ export default function Home() {
           b: "browse",
           a: "arena",
           r: "review",
+          p: "progress",
           f: "friends",
           c: "achievements",
         };
@@ -1829,6 +1835,20 @@ export default function Home() {
                 />
               )}
 
+              {/* Test yourself first — a short diagnostic from this guide's
+                  own questions, before studying. See components/PreTest.tsx. */}
+              <PreTest
+                guideKey={
+                  currentGuideId ??
+                  localGuideKey(
+                    result.guideTitle ?? "Study guide",
+                    result.studyGuide
+                  )
+                }
+                modules={modules}
+                finalReviewQuestions={result.finalReview?.questions}
+              />
+
               <MasterySummary records={guideErrors.records} />
               <StudyPlan testTiming={testTiming} modules={modules} studyHours={result.studyHours} />
 
@@ -2525,6 +2545,19 @@ export default function Home() {
             educationLevel={educationLevel}
             onActivity={activity.recordQuestion}
             onGenerate={() => goToSection("generate")}
+          />
+        </section>
+      )}
+
+      {/* My Progress — your real activity, accuracy, mastery, weekly
+          goal and review forecast. See components/ProgressDashboard.tsx. */}
+      {section === "progress" && (
+        <section className="mt-8 animate-fade-up">
+          <ProgressDashboard
+            userId={user?.id ?? null}
+            days={activity.state.days}
+            streak={activity.streak}
+            xp={activity.xp}
           />
         </section>
       )}

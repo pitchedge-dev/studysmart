@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { ErrorAnswerInput, GuideErrorRecord } from "@/lib/errorTracking";
+import { masteryLevel } from "@/lib/mastery";
 
 export type PersonalizedQuestion = {
   conceptTitle: string;
@@ -21,6 +22,10 @@ export type PersonalizedQuestion = {
   options: string[];
   correctAnswer: string;
   explanation: string;
+  /** Bloom's level this question targets — matched to the concept's
+   *  mastery (Recall for new/weak concepts, Apply/Analyse as it is
+   *  mastered). Set by the generator; older responses omit it. */
+  difficulty?: "Recall" | "Apply" | "Analyse";
 };
 
 /**
@@ -84,6 +89,7 @@ export default function PersonalizedPractice({
             lastPicked: w.lastPicked,
             lastCorrect: w.lastCorrect,
             lastExplanation: w.lastExplanation,
+            masteryLevel: masteryLevel(w) ?? undefined,
           })),
         }),
       });
@@ -249,6 +255,11 @@ export default function PersonalizedPractice({
               >
                 <p className="eyebrow">
                   {q.conceptTitle} · Question {i + 1}
+                  {q.difficulty && (
+                    <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-brand-700">
+                      {q.difficulty}
+                    </span>
+                  )}
                 </p>
                 <p className="mt-1.5 text-base font-bold leading-relaxed text-ink-900">
                   {q.question}

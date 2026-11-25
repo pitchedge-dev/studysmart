@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   CheckCircle2,
@@ -10,6 +10,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
+import { masteryLevel } from "@/lib/mastery";
 import {
   applyAnswer,
   loadErrors,
@@ -21,6 +22,7 @@ import {
   dueConcepts,
   loadAllErrors,
   type DueConcept,
+  type Sm2Grade,
 } from "@/lib/review";
 import EmptyState from "./EmptyState";
 import type { PersonalizedQuestion } from "./PersonalizedPractice";
@@ -125,13 +127,15 @@ export default function ReviewQueue({
   }, [userId, refreshKey]);
 
   /** Record one review answer against the guide copy it came from, so
-   *  the spaced-repetition schedule and the 2-in-a-row mastery rule both
-   *  advance. Uses the same persistence as the rest of error tracking. */
+   *  the SM-2 schedule and the 2-in-a-row mastery rule both advance.
+   *  Uses the same persistence as the rest of error tracking. Returns
+   *  the concept's next interval in days (for the "next review" note). */
   async function recordReviewAnswer(
     guideKey: string,
     q: PersonalizedQuestion,
-    pickedOpt: string
-  ): Promise<void> {
+    pickedOpt: string,
+    grade: Sm2Grade
+  ): Promise<number | null> {
     const correct = pickedOpt === q.correctAnswer;
     const answer: ErrorAnswerInput = {
       source: "personalized",
@@ -145,14 +149,29 @@ export default function ReviewQueue({
     };
     try {
       const records = await loadErrors(userId, guideKey);
-      const next = applyAnswer(records, answer);
+      const next = applyAnswer(records, answer, grade);
       await saveErrors(userId, guideKey, next);
+      const rec = next.find((r) => r.conceptTitle === q.conceptTitle);
+      onActivity?.(correct);
+      return rec?.reviewIntervalDays ?? null;
     } catch {
       // Review answers are a bonus — a persistence failure must not
       // break the session.
+      onActivity?.(correct);
+      return null;
     }
-    onActivity?.(correct);
   }
+
+  /** The student's self-grade for the current correct answer (Hard /
+   *  Good / Easy). A wrong answer is always a lapse ("Again") and needs
+   *  no grade. */
+  const [grade, setGrade] = useState<Sm2Grade | null>(null);
+  /** Next gap (days) for the concept just answered, once recorded. */
+  const [nextIntervalDays, setNextIntervalDays] = useState<number | null>(
+    null
+  );
+  /** Guards against recording the same answer twice (grade tap + Next). */
+  const recordedRef = useRef(false);
 
   async function startReview(isExpress = false) {
     if (due.length === 0 || generating) return;
@@ -163,6 +182,9 @@ export default function ReviewQueue({
     setSessionCorrect(0);
     setCurrent(0);
     setPicked(null);
+    setGrade(null);
+    setNextIntervalDays(null);
+    recordedRef.current = false;
     setExpress(isExpress);
     setExpressLeftMs(15 * 60 * 1000);
     try {
@@ -185,6 +207,7 @@ export default function ReviewQueue({
             lastPicked: d.record.lastPicked,
             lastCorrect: d.record.lastCorrect,
             lastExplanation: d.record.lastExplanation,
+            masteryLevel: masteryLevel(d.record) ?? undefined,
           })),
         }),
       });
@@ -227,18 +250,43 @@ export default function ReviewQueue({
     if (!questions || picked) return;
     const q = questions[current];
     setPicked(opt);
+    setNextIntervalDays(null);
     const correct = opt === q.correctAnswer;
     if (correct) setSessionCorrect((c) => c + 1);
-    // The question belongs to one of the due concepts — record it
-    // against that concept's guide copy.
+    // Recording waits for the grade: a correct answer is graded Hard /
+    // Good / Easy below (SM-2), a wrong answer is a lapse. The record
+    // happens once, when the student moves on.
+  }
+
+  /** Record the current answer once, with its SM-2 grade. Grade taps
+   *  record right away so the "next review" note appears in the
+   *  feedback box; the Next button records only if nothing was graded
+   *  yet (correct without a grade counts as Good, wrong is a lapse). */
+  async function recordOnce(g: Sm2Grade) {
+    if (!questions || !picked || recordedRef.current) return;
+    recordedRef.current = true;
+    const q = questions[current];
+    const correct = picked === q.correctAnswer;
     const dueEntry = due.find(
       (d) => d.record.conceptTitle === q.conceptTitle
     );
     if (dueEntry) {
-      void recordReviewAnswer(dueEntry.guideKey, q, opt);
+      const days = await recordReviewAnswer(dueEntry.guideKey, q, picked, g);
+      setNextIntervalDays(days);
     } else {
       onActivity?.(correct);
     }
+  }
+
+  /** Move on to the next question, recording first if needed. */
+  async function advanceFromReview() {
+    if (!questions) return;
+    if (picked && !recordedRef.current) {
+      const q = questions[current];
+      const correct = picked === q.correctAnswer;
+      await recordOnce(correct ? (grade ?? "good") : "again");
+    }
+    nextQuestion();
   }
 
   // Keyboard 1–4 to answer, Enter to continue.
@@ -258,7 +306,7 @@ export default function ReviewQueue({
         const opt = q?.options[Number(e.key) - 1];
         if (opt) answerCurrent(opt);
       } else if (picked && e.key === "Enter") {
-        nextQuestion();
+        void advanceFromReview();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -268,6 +316,8 @@ export default function ReviewQueue({
 
   function nextQuestion() {
     if (!questions) return;
+    setGrade(null);
+    recordedRef.current = false;
     if (current + 1 >= questions.length) {
       setSessionDone(true);
       setRefreshKey((k) => k + 1);
@@ -288,8 +338,9 @@ export default function ReviewQueue({
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-ink-400">
             Weak concepts due for review today, from your own mistakes across
-            all your guides. Get one right and it comes back later — get it
-            wrong and it comes back tomorrow.
+            all your guides. Get one right, grade how hard it felt, and the
+            next gap adapts — Easy stretches further, Hard comes back
+            sooner. Get it wrong and it comes back tomorrow.
           </p>
         </div>
         <span className="chip-amber">
@@ -462,9 +513,61 @@ export default function ReviewQueue({
               <p>
                 <strong>Explanation:</strong> {q.explanation}
               </p>
+              {picked === q.correctAnswer && (
+                <div className="mt-3">
+                  <p className="text-sm font-bold text-ink-900">
+                    How hard was that?
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-400">
+                    Your grade sets the next gap (SM-2): Easy stretches
+                    further, Hard comes back sooner.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(
+                      [
+                        { g: "hard", label: "Hard", hint: "Barely got it" },
+                        { g: "good", label: "Good", hint: "Got it, with a pause" },
+                        { g: "easy", label: "Easy", hint: "Instant recall" },
+                      ] as const
+                    ).map(({ g, label, hint }) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => {
+                          setGrade(g);
+                          void recordOnce(g);
+                        }}
+                        className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-left shadow-sm transition hover:border-brand-300 hover:bg-brand-50"
+                        title={hint}
+                      >
+                        <span className="block text-sm font-extrabold text-ink-900">
+                          {label}
+                        </span>
+                        <span className="block text-xs font-medium text-ink-400">
+                          {hint}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {picked !== q.correctAnswer && (
+                <p className="mt-3 text-sm leading-relaxed text-ink-600">
+                  Missed it — this concept is due again tomorrow, and its
+                  review ladder restarts.
+                </p>
+              )}
+              {nextIntervalDays !== null && (
+                <p className="mt-2 text-sm font-semibold text-ink-700">
+                  Next review:{" "}
+                  {nextIntervalDays <= 1
+                    ? "tomorrow"
+                    : `in ${nextIntervalDays} days`}
+                </p>
+              )}
               <button
                 type="button"
-                onClick={nextQuestion}
+                onClick={() => void advanceFromReview()}
                 className="btn-primary mt-3"
               >
                 {current + 1 >= questions.length
@@ -484,8 +587,8 @@ export default function ReviewQueue({
             {questions.length} correct
           </h3>
           <p className="mx-auto mt-1 max-w-sm text-sm leading-relaxed text-ink-500">
-            Concepts you got right move further out (3, 7, then 16 days).
-            Ones you missed are due again tomorrow.
+            Concepts you got right move further out — Easy ones furthest,
+            Hard ones sooner. Ones you missed are due again tomorrow.
           </p>
           <button
             type="button"

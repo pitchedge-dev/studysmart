@@ -19,6 +19,11 @@ const WeakConceptSchema = z.object({
   lastPicked: z.string().optional(),
   lastCorrect: z.string().optional(),
   lastExplanation: z.string().optional(),
+  /** The concept's mastery level (Khan Academy pattern) — drives the
+   *  Bloom's difficulty of the fresh questions. */
+  masteryLevel: z
+    .enum(["Attempted", "Familiar", "Proficient", "Mastered"])
+    .optional(),
 });
 
 const PersonalizedQuestionSchema = z.object({
@@ -37,6 +42,9 @@ const PersonalizedQuestionSchema = z.object({
   explanation: z
     .string()
     .describe("A short explanation of why the correct answer is right — and, where the student picked a wrong answer before, why that wrong answer is wrong."),
+  difficulty: z
+    .enum(["Recall", "Apply", "Analyse"])
+    .describe("Bloom's level this question targets: Recall (remember/understand the idea), Apply (use it in a new situation), or Analyse (compare, explain why, break it apart). Match it to the concept's mastery — Recall for Attempted/Familiar, Apply for Proficient, Analyse for Mastered."),
 });
 
 const PersonalizedPracticeSchema = z.object({
@@ -83,8 +91,24 @@ export async function POST(req: NextRequest) {
 
     const weakText = weak
       .map((w, i) => {
+        // Adaptive difficulty (Bloom's taxonomy, matched to mastery):
+        // a concept the student is still Attempting gets Recall
+        // questions; as mastery grows, questions move to Apply and then
+        // Analyse — practice stays at the edge of what they can do
+        // (Vygotsky's zone of proximal development; Bloom's mastery
+        // learning). The evidence for adaptive practice is mixed — one
+        // large Dutch RCT found no average test-score effect — so this
+        // is difficulty matching, not a promised gain.
+        const difficultyHint =
+          w.masteryLevel === "Mastered"
+            ? " — mastery: Mastered, write Analyse questions (compare, explain why, break it apart)"
+            : w.masteryLevel === "Proficient"
+              ? " — mastery: Proficient, write Apply questions (use the idea in a new situation)"
+              : w.masteryLevel === "Familiar"
+                ? " — mastery: Familiar, mix one Recall and one Apply question"
+                : " — mastery: Attempted, write Recall questions (remember and understand the idea)";
         const lines = [
-          `${i + 1}. ${w.conceptTitle}${w.moduleTitle ? ` (module: ${w.moduleTitle})` : ""}${w.misses ? ` — missed ${w.misses} time${w.misses === 1 ? "" : "s"}` : ""}`,
+          `${i + 1}. ${w.conceptTitle}${w.moduleTitle ? ` (module: ${w.moduleTitle})` : ""}${w.misses ? ` — missed ${w.misses} time${w.misses === 1 ? "" : "s"}` : ""}${difficultyHint}`,
         ];
         if (w.lastQuestion) lines.push(`   Last missed question: "${w.lastQuestion}"`);
         if (w.lastPicked) lines.push(`   The student answered: "${w.lastPicked}"`);
@@ -110,7 +134,7 @@ export async function POST(req: NextRequest) {
         const { object } = await generateObject({
           model,
           schema: PersonalizedPracticeSchema,
-          system: `You are StudySMART's personalized practice tutor. ${titleHint}${levelHint}The student got these concepts wrong on their own copy of this study guide — build fresh practice that targets exactly those weak spots. Write NEW questions (never reuse the question they already missed), two per weak concept, up to six total. Make the questions directly test the misunderstanding shown by their wrong answer, and explain in each answer why the right answer is right and why their previous wrong answer was wrong. Keep every question and explanation short and at the right level. Do not invent topics beyond these concepts.`,
+          system: `You are StudySMART's personalized practice tutor. ${titleHint}${levelHint}The student got these concepts wrong on their own copy of this study guide — build fresh practice that targets exactly those weak spots. Write NEW questions (never reuse the question they already missed), two per weak concept, up to six total. Make the questions directly test the misunderstanding shown by their wrong answer, and explain in each answer why the right answer is right and why their previous wrong answer was wrong. Match each question's difficulty to the mastery note on its concept (Recall / Apply / Analyse) and tag it with that difficulty. Keep every question and explanation short and at the right level. Do not invent topics beyond these concepts.`,
           prompt: `The student's weak concepts:\n\n${weakText}`,
           maxTokens: 4096,
           maxRetries: 2,

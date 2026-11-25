@@ -42,6 +42,7 @@ import GuideVideos from "./GuideVideos";
 import GuideNavBar, { type GuideNavSection } from "./GuideNavBar";
 import GivenResources from "./GivenResources";
 import type { GivenResource } from "@/lib/guideSchema";
+import PreTest from "./PreTest";
 import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
 import MeetYourBots from "./MeetYourBots";
@@ -809,6 +810,16 @@ export default function GuideView({
           </p>
         </div>
       )}
+
+      {/* Test yourself first — a short diagnostic from this guide's own
+          questions, before studying. See components/PreTest.tsx. */}
+      <div className="mt-6">
+        <PreTest
+          guideKey={guideKey}
+          modules={modules}
+          finalReviewQuestions={result.finalReview?.questions}
+        />
+      </div>
 
       {/* Mastery summary + study plan, from this user's real answers and
           the test date they gave. */}
