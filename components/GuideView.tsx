@@ -14,10 +14,18 @@ import {
   Lightbulb,
   ListTree,
   Search,
+  Send,
   Sparkles,
   Wrench,
   XCircle,
 } from "lucide-react";
+import {
+  getProfilesByIds,
+  listFriendships,
+  sendGuideToFriend,
+  type Profile,
+} from "@/lib/supabase";
+import { initialsFor } from "@/lib/friends";
 import TargetedPractice, { type StudyModule } from "./TargetedPractice";
 import PersonalizedPractice from "./PersonalizedPractice";
 import { applyAnswer, MASTERY_STREAK, useGuideErrors, type ErrorAnswerInput } from "@/lib/errorTracking";
@@ -142,6 +150,56 @@ export default function GuideView({
   // Builder Bot — edits this guide in plain words. Only for the owner
   // of a saved guide (guideId + isOwner); never on someone else's guide.
   const [builderBotOpenState, setBuilderBotOpenState] = useState(builderBotOpen);
+
+  // One-tap send to a friend (owner only, saved guide). Friends load
+  // here so the guide page needs no extra plumbing.
+  const [sendFriends, setSendFriends] = useState<Profile[]>([]);
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
+  const [sendNotice, setSendNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOwner || !guideId || !userId) return;
+    let alive = true;
+    void (async () => {
+      const list = await listFriendships(userId);
+      const ids = list
+        .filter((r) => r.status === "accepted")
+        .map((r) =>
+          r.requester_id === userId ? r.addressee_id : r.requester_id
+        );
+      const found = await getProfilesByIds([...new Set(ids)]);
+      if (alive) setSendFriends(found);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isOwner, guideId, userId]);
+
+  async function sendToFriend(profile: Profile) {
+    if (!userId || !guideId || sendingTo) return;
+    setSendingTo(profile.user_id);
+    const ok = await sendGuideToFriend({
+      senderId: userId,
+      recipientId: profile.user_id,
+      guideId,
+      snapshot: {
+        topic: result.guideTitle ?? "Shared guide",
+        education_level: meta?.educationLevel ?? null,
+        test_timing: meta?.testTiming ?? null,
+        guide: result as unknown as Record<string, unknown>,
+        quiz: result.quiz ?? null,
+        kind: "guide",
+        game: null,
+        author_name: meta?.authorName ?? null,
+      },
+    });
+    setSendingTo(null);
+    setSendNotice(
+      ok
+        ? `Sent to @${profile.username}.`
+        : "Could not send that guide. Try again."
+    );
+  }
 
   // When Builder Bot saves a new version, the guide content changes
   // under this view — reset per-question state so old answers can't
@@ -681,6 +739,43 @@ export default function GuideView({
           onNavigate={scrollToId}
         />
       </div>
+
+      {/* Send to a friend — one tap per friend (owner only, saved guide). */}
+      {isOwner && guideId && sendFriends.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-ink-100 bg-white p-4 shadow-sm">
+          <p className="flex items-center gap-2 text-sm font-extrabold tracking-tight text-ink-900">
+            <Send className="h-4 w-4 text-brand-600" /> Send this guide to a
+            friend
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {sendFriends.map((f) => (
+              <button
+                key={f.user_id}
+                type="button"
+                onClick={() => void sendToFriend(f)}
+                disabled={sendingTo !== null}
+                className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white py-1.5 pl-1.5 pr-3 text-sm font-semibold text-ink-800 shadow-sm transition hover:border-brand-400 hover:bg-brand-50 disabled:opacity-60"
+              >
+                <span
+                  aria-hidden
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-extrabold text-brand-700"
+                >
+                  {initialsFor(f.display_name)}
+                </span>
+                {sendingTo === f.user_id ? "Sending…" : f.display_name}
+              </button>
+            ))}
+          </div>
+          {sendNotice && (
+            <p className="mt-2 text-xs font-semibold text-emerald-600">
+              {sendNotice}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-ink-400">
+            Private — only that one friend receives it.
+          </p>
+        </div>
+      )}
 
       {/* Mastery summary + study plan, from this user's real answers and
           the test date they gave. */}

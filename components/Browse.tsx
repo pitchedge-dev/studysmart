@@ -8,16 +8,20 @@ import {
   Loader2,
   Play,
   Swords,
+  UserPlus,
 } from "lucide-react";
 import {
   addFavorite,
   isSupabaseConfigured,
+  listFriendships,
   listMyFavoriteIds,
   listPublicGuides,
   removeFavorite,
+  sendFriendRequest,
   type AppUser,
   type StudyGuideRow,
 } from "@/lib/supabase";
+import { recordOpenedAuthor } from "@/lib/friends";
 import type { GameData } from "./BattleArena";
 import type { GenerateResult } from "@/app/page";
 import EmptyState from "./EmptyState";
@@ -62,15 +66,30 @@ export default function Browse({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Author id -> relationship, so each card can offer one-tap Add. */
+  const [friendStatus, setFriendStatus] = useState<
+    Record<string, "friend" | "pending">
+  >({});
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
 
   async function refresh() {
     setLoading(true);
-    const [pub, favIds] = await Promise.all([
+    const [pub, favIds, friendships] = await Promise.all([
       listPublicGuides(),
       user ? listMyFavoriteIds(user.id) : Promise.resolve(new Set<string>()),
+      user ? listFriendships(user.id) : Promise.resolve([]),
     ]);
     setItems(pub);
     setFavorites(favIds);
+    if (user) {
+      const byId: Record<string, "friend" | "pending"> = {};
+      for (const r of friendships) {
+        const other =
+          r.requester_id === user.id ? r.addressee_id : r.requester_id;
+        byId[other] = r.status === "accepted" ? "friend" : "pending";
+      }
+      setFriendStatus(byId);
+    }
     setLoading(false);
   }
 
@@ -80,6 +99,9 @@ export default function Browse({
   }, [user?.id]);
 
   function openItem(row: StudyGuideRow) {
+    // Remember the author (id only) so Friends can suggest people
+    // whose published guides you actually opened.
+    recordOpenedAuthor(row.user_id);
     if (row.kind === "game" && row.game) {
       onOpenGame(row.game as unknown as GameData, row.topic);
       return;
@@ -197,6 +219,38 @@ export default function Browse({
                 />
                 {favorites.has(row.id) ? "Favorited" : "Favorite"}
               </button>
+              {user &&
+                row.user_id !== user.id &&
+                friendStatus[row.user_id] !== "friend" &&
+                (friendStatus[row.user_id] === "pending" ||
+                sentIds.has(row.user_id) ? (
+                  <span className="self-center text-xs font-semibold text-ink-400">
+                    Friend request sent
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await sendFriendRequest(
+                        user.id,
+                        row.user_id
+                      );
+                      if (res.ok) {
+                        setSentIds((prev) => new Set(prev).add(row.user_id));
+                        setNotice(
+                          `Friend request sent to ${row.author_name}.`
+                        );
+                      } else {
+                        setNotice(
+                          res.message ?? "Could not send the request."
+                        );
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3 py-1.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:text-brand-700"
+                  >
+                    <UserPlus className="h-4 w-4" /> Add friend
+                  </button>
+                ))}
               {!user && (
                 <span className="self-center text-xs font-medium text-ink-400">
                   Sign in to favorite

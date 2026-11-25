@@ -19,6 +19,7 @@ import {
   Swords,
   Trash2,
   Users,
+  UserPlus,
   Wrench,
 } from "lucide-react";
 import {
@@ -43,6 +44,7 @@ import {
   listSharedWithMe,
   removeFavorite,
   renameCourseGuides,
+  sendFriendRequest,
   sendGuideToFriend,
   setGuideCourse,
   setGuidePublic,
@@ -52,6 +54,7 @@ import {
   type SharedGuideRow,
   type StudyGuideRow,
 } from "@/lib/supabase";
+import { initialsFor } from "@/lib/friends";
 import type { GameData } from "./BattleArena";
 import type { FriendEntry } from "./Friends";
 import type { GenerateResult } from "@/app/page";
@@ -137,6 +140,10 @@ export default function YourGuides({
   const [sendFor, setSendFor] = useState<StudyGuideRow | null>(null);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
+  /** Filter text for the friend picker when the friend list is long. */
+  const [sendFilter, setSendFilter] = useState("");
+  /** Author/sender ids a friend request was just sent to. */
+  const [sentFriendIds, setSentFriendIds] = useState<Set<string>>(new Set());
 
   // --- Courses -----------------------------------------------------------
   const [knownCourses, setKnownCourses] = useState<string[]>([]);
@@ -410,12 +417,30 @@ export default function YourGuides({
     if (saved) refresh();
   }
 
-  async function doSend() {
-    if (!sendFor || !sendTo || !user) return;
+  /** One-tap friend request from a guide card — requests still need
+   *  the other person to accept; this only skips the username hunt. */
+  async function addFriendById(id: string, label: string) {
+    if (!user || id === user.id) return;
+    const res = await sendFriendRequest(user.id, id);
+    if (res.ok) {
+      setSentFriendIds((prev) => new Set(prev).add(id));
+      setNotice(`Friend request sent to ${label}.`);
+    } else {
+      setNotice(res.message ?? "Could not send the request.");
+    }
+  }
+
+  function isFriend(id: string): boolean {
+    return friends.some((f) => f.profile?.user_id === id);
+  }
+
+  async function doSend(recipientId?: string) {
+    const to = recipientId ?? sendTo;
+    if (!sendFor || !to || !user) return;
     setSending(true);
     const ok = await sendGuideToFriend({
       senderId: user.id,
-      recipientId: sendTo,
+      recipientId: to,
       guideId: sendFor.id,
       snapshot: {
         topic: sendFor.topic,
@@ -430,9 +455,14 @@ export default function YourGuides({
     });
     setSending(false);
     if (ok) {
-      setNotice("Guide sent to your friend — only they can see it.");
+      const friend = friends.find((f) => f.profile?.user_id === to);
+      const handle = friend?.profile?.username
+        ? `Sent to @${friend.profile.username}.`
+        : "Guide sent to your friend — only they can see it.";
+      setNotice(handle);
       setSendFor(null);
       setSendTo("");
+      setSendFilter("");
       refresh();
     } else {
       setNotice("Could not send that guide. Try again.");
@@ -904,41 +934,102 @@ export default function YourGuides({
                       You have no accepted friends yet — add friends below to
                       send them guides.
                     </p>
-                  ) : (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <select
-                        value={sendTo}
-                        onChange={(e) => setSendTo(e.target.value)}
-                        className="input max-w-xs"
-                      >
-                        <option value="" disabled>
-                          Choose a friend…
-                        </option>
+                  ) : friends.length <= 8 ? (
+                    <div className="mt-2">
+                      <p className="text-xs font-medium text-ink-500">
+                        Tap a friend to send it — one tap, done.
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
                         {friends.map((f) => (
-                          <option key={f.friendshipId} value={f.profile?.user_id}>
-                            {f.profile?.display_name ?? "Friend"} (@
-                            {f.profile?.username ?? "?"})
-                          </option>
+                          <button
+                            key={f.friendshipId}
+                            type="button"
+                            onClick={() =>
+                              void doSend(f.profile?.user_id ?? "")
+                            }
+                            disabled={
+                              sending || !f.profile?.user_id
+                            }
+                            className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white py-1.5 pl-1.5 pr-3 text-sm font-semibold text-ink-800 shadow-sm transition hover:border-brand-400 hover:bg-brand-50 disabled:opacity-60"
+                          >
+                            <span
+                              aria-hidden
+                              className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-extrabold text-brand-700"
+                            >
+                              {initialsFor(f.profile?.display_name)}
+                            </span>
+                            {f.profile?.display_name ?? "Friend"}
+                          </button>
                         ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={doSend}
-                        disabled={!sendTo || sending}
-                        className="btn-primary px-3 py-1.5 text-sm"
-                      >
-                        {sending && (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        )}
-                        <Send className="h-4 w-4" /> Send
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSendFor(null)}
-                        className="btn-ghost"
-                      >
-                        Cancel
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setSendFor(null)}
+                          className="btn-ghost"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <input
+                        value={sendFilter}
+                        onChange={(e) => setSendFilter(e.target.value)}
+                        placeholder="Search your friends…"
+                        aria-label="Search your friends"
+                        className="input max-w-xs"
+                      />
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <select
+                          value={sendTo}
+                          onChange={(e) => setSendTo(e.target.value)}
+                          className="input max-w-xs"
+                        >
+                          <option value="" disabled>
+                            Choose a friend…
+                          </option>
+                          {friends
+                            .filter((f) => {
+                              const q = sendFilter.trim().toLowerCase();
+                              if (!q) return true;
+                              return (
+                                f.profile?.display_name
+                                  ?.toLowerCase()
+                                  .includes(q) ||
+                                f.profile?.username
+                                  ?.toLowerCase()
+                                  .includes(q)
+                              );
+                            })
+                            .map((f) => (
+                              <option
+                                key={f.friendshipId}
+                                value={f.profile?.user_id}
+                              >
+                                {f.profile?.display_name ?? "Friend"} (@
+                                {f.profile?.username ?? "?"})
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void doSend()}
+                          disabled={!sendTo || sending}
+                          className="btn-primary px-3 py-1.5 text-sm"
+                        >
+                          {sending && (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          )}
+                          <Send className="h-4 w-4" /> Send
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSendFor(null)}
+                          className="btn-ghost"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                   <p className="mt-2 text-xs text-ink-400">
@@ -998,6 +1089,23 @@ export default function YourGuides({
                   >
                     <Heart className="h-4 w-4" /> Unfavorite
                   </button>
+                  {row.user_id !== user.id &&
+                    !isFriend(row.user_id) &&
+                    (sentFriendIds.has(row.user_id) ? (
+                      <span className="self-center text-xs font-semibold text-ink-400">
+                        Friend request sent
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void addFriendById(row.user_id, row.author_name)
+                        }
+                        className="btn-secondary px-3 py-1.5 text-sm"
+                      >
+                        <UserPlus className="h-4 w-4" /> Add friend
+                      </button>
+                    ))}
                 </div>
               </article>
             ))}
@@ -1051,6 +1159,27 @@ export default function YourGuides({
                     >
                       <BookOpen className="h-4 w-4" /> Save to my guides
                     </button>
+                    {sender &&
+                      sender.user_id !== user.id &&
+                      !isFriend(sender.user_id) &&
+                      (sentFriendIds.has(sender.user_id) ? (
+                        <span className="self-center text-xs font-semibold text-ink-400">
+                          Friend request sent
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void addFriendById(
+                              sender.user_id,
+                              sender.display_name
+                            )
+                          }
+                          className="btn-secondary px-3 py-1.5 text-sm"
+                        >
+                          <UserPlus className="h-4 w-4" /> Add friend
+                        </button>
+                      ))}
                     <button
                       type="button"
                       onClick={async () => {
