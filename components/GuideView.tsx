@@ -6,23 +6,30 @@ import ReactMarkdown from "react-markdown";
 import {
   ArrowLeft,
   BookOpen,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  EyeOff,
   Focus,
+  Globe,
   GraduationCap,
   Lightbulb,
   ListTree,
+  Loader2,
   Search,
   Send,
   Sparkles,
+  Swords,
   Wrench,
   XCircle,
 } from "lucide-react";
 import {
+  getGuideById,
   getProfilesByIds,
   listFriendships,
   sendGuideToFriend,
+  setGuidePublic,
   type Profile,
 } from "@/lib/supabase";
 import { initialsFor } from "@/lib/friends";
@@ -47,6 +54,11 @@ import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
 import MeetYourBots from "./MeetYourBots";
 import { studyHoursLabel } from "@/lib/studyTime";
+import {
+  buildArenaExportSourceFromResult,
+  writePendingArenaExport,
+  type ArenaExportSource,
+} from "@/lib/arenaExport";
 import type { GenerateResult } from "@/app/page";
 
 type QuizQuestion = {
@@ -99,6 +111,11 @@ export default function GuideView({
   onGuideUpdated,
   /** Open Builder Bot on first render (from ?bot=1). */
   builderBotOpen = false,
+  /** Optional direct handoff for "Turn into Battle Arena". When the
+   *  parent wires it, the export jumps straight to the Arena; when
+   *  absent, the export is stored as a pending export and the Arena
+   *  picks it up the next time it mounts (see turnIntoArena). */
+  onTurnIntoArena,
 }: {
   result: GenerateResult;
   meta?: {
@@ -122,6 +139,7 @@ export default function GuideView({
   isOwner?: boolean;
   onGuideUpdated?: (guide: GenerateResult) => void;
   builderBotOpen?: boolean;
+  onTurnIntoArena?: (source: ArenaExportSource) => void;
 }) {
   const modules: StudyModule[] = result.modules ?? [];
   const quiz: QuizQuestion[] = result.quiz ?? [];
@@ -182,6 +200,54 @@ export default function GuideView({
   // Builder Bot — edits this guide in plain words. Only for the owner
   // of a saved guide (guideId + isOwner); never on someone else's guide.
   const [builderBotOpenState, setBuilderBotOpenState] = useState(builderBotOpen);
+
+  // One-tap Publish / Unpublish for the guide owner. The published
+  // state is read from the saved row (GuideView only gets the guide
+  // JSON, not the row), so it loads once when the owner opens the page.
+  const [isPublic, setIsPublic] = useState<boolean | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  // "Turn into Battle Arena" from the standalone page: the export is
+  // stored and the Arena picks it up when it next mounts.
+  const [arenaReady, setArenaReady] = useState(false);
+
+  useEffect(() => {
+    if (!guideId || !isOwner) return;
+    let cancelled = false;
+    getGuideById(guideId).then((row) => {
+      if (!cancelled && row) setIsPublic(row.is_public ?? false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [guideId, isOwner]);
+
+  /** Build a Battle Arena game FROM this guide's actual content — its
+   *  topic, modules, concepts and key facts, plus the options it was
+   *  made with — without retyping anything. */
+  function turnIntoArena() {
+    const source = buildArenaExportSourceFromResult(
+      result,
+      {
+        educationLevel: meta?.educationLevel,
+        testTiming: meta?.testTiming,
+      },
+      guideId ?? undefined
+    );
+    if (onTurnIntoArena) {
+      onTurnIntoArena(source);
+      return;
+    }
+    writePendingArenaExport(source);
+    setArenaReady(true);
+  }
+
+  async function setPublic(next: boolean) {
+    if (!guideId || publishing) return;
+    setPublishing(true);
+    const ok = await setGuidePublic(guideId, next);
+    setPublishing(false);
+    if (ok) setIsPublic(next);
+  }
 
   // One-tap send to a friend (owner only, saved guide). Friends load
   // here so the guide page needs no extra plumbing.
@@ -719,12 +785,57 @@ export default function GuideView({
               <Focus className="h-4 w-4 text-brand-600" />
               {focusMode ? "Exit focus" : "Focus mode"}
             </button>
+            <button
+              type="button"
+              onClick={turnIntoArena}
+              className="btn-secondary px-3 py-1.5 text-sm"
+              title="Build a Battle Arena game from this guide's actual content — no retyping"
+            >
+              <Swords className="h-4 w-4" /> Turn into Battle Arena
+            </button>
+            {isOwner && guideId && isPublic !== null && (
+              isPublic ? (
+                <>
+                  <span className="chip-amber">
+                    <Check className="h-3.5 w-3.5" /> Published ✓
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void setPublic(false)}
+                    disabled={publishing}
+                    className="btn-secondary px-3 py-1.5 text-sm"
+                  >
+                    <EyeOff className="h-4 w-4" /> Unpublish
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void setPublic(true)}
+                  disabled={publishing}
+                  className="btn-secondary px-3 py-1.5 text-sm"
+                >
+                  {publishing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Globe className="h-4 w-4" />
+                  )}
+                  Publish
+                </button>
+              )
+            )}
             <span className="chip-amber">
               <GraduationCap className="h-3.5 w-3.5" /> Complete guide
             </span>
           </div>
         </div>
       </div>
+      {isOwner && guideId && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-400">
+          Publishing makes this guide public — anyone can view it in Browse.
+          Don&apos;t publish anything with personal information in it.
+        </p>
+      )}
 
       {/* Builder Bot, unmissable: a bright banner right under the title
           for the guide owner, plus the three bots introduced up front. */}
@@ -745,6 +856,22 @@ export default function GuideView({
           >
             <Wrench className="h-4 w-4" /> Edit with Builder Bot
           </button>
+        </div>
+      )}
+      {arenaReady && (
+        <div className="mt-5 rounded-2xl border border-brand-200 bg-brand-50 p-4 sm:p-5">
+          <p className="flex items-center gap-2 text-base font-extrabold tracking-tight text-brand-800">
+            <Swords className="h-5 w-5 shrink-0" /> Your Battle Arena game is
+            ready to build
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-brand-700">
+            The game ideas for &ldquo;{result.guideTitle ?? "this guide"}
+            &rdquo; are waiting — open Battle Arena from the home page and
+            they will appear automatically, built from this guide.
+          </p>
+          <Link href="/" className="btn-primary mt-3">
+            Back to StudySMART
+          </Link>
         </div>
       )}
       <div className="mt-5">

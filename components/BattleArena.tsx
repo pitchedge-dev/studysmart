@@ -5,8 +5,12 @@ import {
   ArrowLeft,
   BookOpen,
   Brain,
+  Check,
   CheckCircle2,
+  EyeOff,
+  FileUp,
   Flame,
+  Globe,
   Heart,
   Layers,
   LayoutTemplate,
@@ -15,6 +19,7 @@ import {
   RefreshCw,
   RotateCcw,
   Sparkles,
+  Swords,
   Timer,
   Trophy,
   Users,
@@ -24,6 +29,17 @@ import {
 } from "lucide-react";
 import TutorPanel from "./TutorPanel";
 import { playArenaSound } from "@/lib/arenaSound";
+import {
+  readPendingArenaExport,
+  lengthForStudyHours,
+  type ArenaExportSource,
+} from "@/lib/arenaExport";
+import {
+  ARENA_MAX_TOTAL_BYTES,
+  extractArenaFileText,
+  type ArenaUploadedFile,
+} from "@/lib/arenaUpload";
+import { STUDY_HOURS_OPTIONS, studyHoursLabel } from "@/lib/studyTime";
 import {
   fetchArenaBoard,
   fetchArenaTitles,
@@ -40,6 +56,7 @@ import {
 import {
   getMyProfile,
   saveGuideToAccount,
+  setGuidePublic,
   type AppUser,
 } from "@/lib/supabase";
 
@@ -60,6 +77,14 @@ export type GameData = {
   timedSecondsPerQuestion?: number;
   cards?: GameCard[];
   questions: GameQuestion[];
+  /**
+   * Export marker — NOT a playable game. "Turn into Battle Arena" sends
+   * a guide through the existing `initialGame` channel as a GameData
+   * with this field set: the guide's real content + the options it was
+   * made with. BattleArena sees it, skips loading it as a game, and
+   * builds the game templates from the guide instead. Never saved.
+   */
+  exportSource?: ArenaExportSource;
 };
 
 /** Step 1 of the two-step Arena flow: a fast, INCOMPLETE game idea — just a
@@ -187,6 +212,30 @@ export default function BattleArena({
 
   // Bigger, more immersive games: length choice, sound, lives, streaks.
   const [gameLength, setGameLength] = useState<GameLength>(20);
+
+  // Arena generation options — the SAME options as the study-guide form
+  // (education level, test timing, study time, file upload, and the two
+  // toggles). All optional, nothing pre-selected; every choice is passed
+  // to /api/generate-game and genuinely changes the game. The toggles
+  // are the guide form's toggles translated to the Arena: "Include
+  // Practice Quiz" = trivia questions, "Extract Key Concepts" =
+  // flashcard/matching cards.
+  const [arenaEducation, setArenaEducation] = useState("");
+  const [arenaTestTiming, setArenaTestTiming] = useState("");
+  const [arenaStudyHours, setArenaStudyHours] = useState("");
+  const [includeQuiz, setIncludeQuiz] = useState(true);
+  const [includeConcepts, setIncludeConcepts] = useState(true);
+  const [arenaFiles, setArenaFiles] = useState<ArenaUploadedFile[]>([]);
+  const [arenaFileNotice, setArenaFileNotice] = useState<string | null>(null);
+  // Publishing: the saved row id for the game on screen (set when a
+  // generated game is auto-saved), and whether that game is published.
+  const [savedGameRowId, setSavedGameRowId] = useState<string | null>(null);
+  const [gamePublished, setGamePublished] = useState(false);
+  const [publishingGame, setPublishingGame] = useState(false);
+  const [publishNote, setPublishNote] = useState<string | null>(null);
+  // A guide → Arena export is consumed once, even if the effect runs
+  // twice (the marker's initialGameKey, or "local" for a pending export).
+  const exportConsumedRef = useRef<number | "local" | null>(null);
   const [muted, setMuted] = useState<boolean>(
     () =>
       typeof window !== "undefined" &&
@@ -326,8 +375,19 @@ export default function BattleArena({
   useEffect(() => {
     if (!initialGame) return;
     const g = initialGame;
+    // Export marker: "Turn into Battle Arena" sends a guide through
+    // this channel as a GameData with exportSource set. It is NOT a
+    // playable game — build the templates from the guide's real
+    // content instead, and open the Arena on them.
+    if (g.exportSource) {
+      if (exportConsumedRef.current !== initialGameKey) {
+        exportConsumedRef.current = initialGameKey ?? null;
+        void startFromExportSource(g.exportSource);
+      }
+      return;
+    }
     setGame(g);
-    setPlayMode("trivia");
+    setPlayMode(g.questions.length > 0 ? "trivia" : "flashcards");
     resetPlayState(playerCount);
     setTimeLeft(g.timedSecondsPerQuestion ?? null);
     setTemplates(null);
@@ -336,29 +396,158 @@ export default function BattleArena({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialGameKey]);
 
-  async function saveGameToAccount(g: GameData, source: string) {
-    if (!user) return;
+  // Guide → Arena export from the standalone guide page (/guide/[id]):
+  // that page has no "open game" callback, so it stores the export in
+  // localStorage and sends the user home. When the Arena next mounts
+  // with no saved game to load, the export is consumed and the game
+  // templates generate themselves from the guide.
+  useEffect(() => {
+    if (initialGame) return;
+    if (exportConsumedRef.current === "local") return;
+    const pending = readPendingArenaExport();
+    if (!pending) return;
+    exportConsumedRef.current = "local";
+    void startFromExportSource(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Auto-save a generated game to the signed-in user's account, and
+   *  return the saved row id (null when signed out or the save failed).
+   *  The row id is what publishing needs — the results screen and the
+   *  template Publish button publish this exact row. The game is saved
+   *  with the arena options it was built with, so a saved game shows
+   *  the same level / timing / study time as the guide it came from. */
+  async function saveGameToAccount(
+    g: GameData,
+    source: string
+  ): Promise<string | null> {
+    if (!user) return null;
     const profile = await getMyProfile(user.id);
     const saved = await saveGuideToAccount({
       user,
       profile,
       topic: (guideTopic || source).slice(0, 500),
-      educationLevel: "",
-      testTiming: "",
-      guide: { guideTitle: g.title, gameTitle: g.title } as Record<string, unknown>,
+      educationLevel: arenaEducation,
+      testTiming: arenaTestTiming,
+      guide: {
+        guideTitle: g.title,
+        gameTitle: g.title,
+        studyHours: arenaStudyHours || undefined,
+      } as Record<string, unknown>,
       quiz: g.questions,
       kind: "game",
       game: g as unknown as Record<string, unknown>,
     });
-    setGameSavedNote(
-      saved ? "Game saved to your study guides." : null
-    );
+    setGameSavedNote(saved ? "Game saved to your study guides." : null);
+    const rowId = saved ? saved.id : null;
+    setSavedGameRowId(rowId);
+    setGamePublished(false);
+    setPublishNote(null);
+    return rowId;
+  }
+
+  /** The arena options as they travel to /api/generate-game. */
+  type ArenaOptions = {
+    educationLevel: string;
+    testTiming: string;
+    studyHours: string;
+    topicType?: string;
+    includeQuiz: boolean;
+    includeConcepts: boolean;
+  };
+  function currentArenaOptions(): ArenaOptions {
+    return {
+      educationLevel: arenaEducation,
+      testTiming: arenaTestTiming,
+      studyHours: arenaStudyHours,
+      includeQuiz,
+      includeConcepts,
+    };
+  }
+
+  /** Uploaded material, appended to the game source so the game is built
+   *  from the student's own files as well as the topic. */
+  function sourceWithUploads(source: string): string {
+    if (arenaFiles.length === 0) return source;
+    const extra = arenaFiles
+      .map((f) => `\n\nFrom uploaded file "${f.name}":\n${f.text}`)
+      .join("");
+    return `${source}${extra}`.slice(0, 200000);
+  }
+
+  /** Start the Arena from a guide export: carry the guide's options over
+   *  (level, timing, study time → length), then generate the templates
+   *  from the guide's real content. */
+  async function startFromExportSource(source: ArenaExportSource) {
+    setArenaEducation(source.educationLevel ?? "");
+    setArenaTestTiming(source.testTiming ?? "");
+    setArenaStudyHours(source.studyHours ?? "");
+    const len = lengthForStudyHours(source.studyHours);
+    if (len) setGameLength(len);
+    setTopic(source.topic);
+    setSavedGameRowId(null);
+    setGamePublished(false);
+    setPublishNote(null);
+    setGameSavedNote(null);
+    await generateTemplates(source.content, {
+      educationLevel: source.educationLevel ?? "",
+      testTiming: source.testTiming ?? "",
+      studyHours: source.studyHours ?? "",
+      topicType: source.topicType,
+      includeQuiz: true,
+      includeConcepts: true,
+    });
+  }
+
+  /** Upload .pdf / .txt / .md / .csv files for the game. Text is
+   *  extracted in the browser; images are not accepted (the game
+   *  generator works from text only). Same 10 MB total limit as the
+   *  guide form. Files are never published. */
+  async function handleArenaUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setArenaFileNotice(null);
+    const incoming = Array.from(files);
+    const currentTotal = arenaFiles.reduce((n, f) => n + f.size, 0);
+    const incomingTotal = incoming.reduce((n, f) => n + f.size, 0);
+    if (currentTotal + incomingTotal > ARENA_MAX_TOTAL_BYTES) {
+      setArenaFileNotice(
+        "Those files are too large to process — keep total uploads under 10 MB."
+      );
+      return;
+    }
+    const done: ArenaUploadedFile[] = [];
+    for (const file of incoming) {
+      try {
+        const text = await extractArenaFileText(file);
+        if (!text.trim()) {
+          setArenaFileNotice(
+            `Could not read any text from ${file.name} — it may be a scanned image PDF.`
+          );
+          continue;
+        }
+        done.push({
+          name: file.name,
+          size: file.size,
+          text: text.slice(0, 100000),
+        });
+      } catch {
+        setArenaFileNotice(
+          `${file.name} is not a supported file type. Upload .pdf, .txt, .md, or .csv — images can't be used for games.`
+        );
+      }
+    }
+    if (done.length > 0) {
+      setArenaFiles((prev) => [...prev, ...done]);
+    }
   }
 
   // Step 1: fast, incomplete template previews — three game ideas in a few
   // seconds, generated on demand from the topic (lightest model first).
-  async function generateTemplates(source: string) {
+  // `opts` lets a guide export pass the guide's own options even before
+  // the form state has caught up; otherwise the form's options are used.
+  async function generateTemplates(source: string, opts?: ArenaOptions) {
     if (!source.trim() || templatesLoading || loading) return;
+    const o = opts ?? currentArenaOptions();
     setError(null);
     setTemplatesError(null);
     setTemplatesLoading(true);
@@ -372,9 +561,14 @@ export default function BattleArena({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topicOrNotes: source.trim(),
+          topicOrNotes: sourceWithUploads(source.trim()),
           step: "templates",
-          topicType,
+          topicType: o.topicType ?? topicType,
+          educationLevel: o.educationLevel || undefined,
+          testTiming: o.testTiming || undefined,
+          studyHours: o.studyHours || undefined,
+          includeQuiz: o.includeQuiz,
+          includeConcepts: o.includeConcepts,
         }),
       });
       const data = await res.json();
@@ -393,7 +587,9 @@ export default function BattleArena({
 
   // Step 2: the user picked a template — the AI finishes the full game
   // from it (full question set, answers, cards where the type uses them).
-  async function chooseTemplate(template: GameTemplate) {
+  // `publishAfter` (the Publish button on a template card) publishes the
+  // game to Browse right after it saves — one tap, build + publish.
+  async function chooseTemplate(template: GameTemplate, publishAfter = false) {
     if (loading) return;
     setError(null);
     setLoading(true);
@@ -405,27 +601,74 @@ export default function BattleArena({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topicOrNotes: templatesSource,
+          topicOrNotes: sourceWithUploads(templatesSource),
           step: "full",
           chosenTemplate: template,
           playerCount,
           questionCount: gameLength,
           topicType,
+          educationLevel: arenaEducation || undefined,
+          testTiming: arenaTestTiming || undefined,
+          studyHours: arenaStudyHours || undefined,
+          includeQuiz,
+          includeConcepts,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to generate the game.");
       const g = data as GameData;
       setGame(g);
-      setPlayMode("trivia");
+      setPlayMode(g.questions.length > 0 ? "trivia" : "flashcards");
       resetPlayState(playerCount);
       setTimeLeft(g.timedSecondsPerQuestion ?? null);
       // Signed in? Save the game to the account automatically.
-      void saveGameToAccount(g, templatesSource);
+      const rowId = await saveGameToAccount(g, templatesSource);
+      if (publishAfter) {
+        if (rowId) {
+          const ok = await setGuidePublic(rowId, true);
+          if (ok) {
+            setGamePublished(true);
+            setPublishNote("Published ✓ — this game now appears in Browse.");
+          } else {
+            setPublishNote("The game was built, but publishing failed — try again from the results screen.");
+          }
+        } else {
+          setPublishNote("This game couldn't be saved to your account, so it couldn't be published — it's still playable here.");
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  /** Publish the finished game on screen to Browse — one tap. The game
+   *  must have been auto-saved first (savedGameRowId); games opened from
+   *  Browse or Your Study Guides are published from their own card. */
+  async function publishGame() {
+    if (!savedGameRowId || publishingGame) return;
+    setPublishingGame(true);
+    const ok = await setGuidePublic(savedGameRowId, true);
+    setPublishingGame(false);
+    if (ok) {
+      setGamePublished(true);
+      setPublishNote("Published ✓ — this game now appears in Browse.");
+    } else {
+      setPublishNote("Couldn't publish — please try again.");
+    }
+  }
+
+  async function unpublishGame() {
+    if (!savedGameRowId || publishingGame) return;
+    setPublishingGame(true);
+    const ok = await setGuidePublic(savedGameRowId, false);
+    setPublishingGame(false);
+    if (ok) {
+      setGamePublished(false);
+      setPublishNote("Unpublished — it is private again.");
+    } else {
+      setPublishNote("Couldn't unpublish — please try again.");
     }
   }
 
@@ -745,6 +988,9 @@ export default function BattleArena({
     setTemplatesError(null);
     setError(null);
     setGameSavedNote(null);
+    setSavedGameRowId(null);
+    setGamePublished(false);
+    setPublishNote(null);
     resetPlayState(1);
     setTimeLeft(null);
   }
@@ -838,6 +1084,180 @@ export default function BattleArena({
               </button>
             </div>
           )}
+          {/* Same generation options as a study guide — all optional,
+              nothing pre-selected. Each one changes the game: level sets
+              the difficulty, test timing sets the focus, study time sets
+              the pace (and suggests the length), files add your own
+              material, and the toggles choose trivia questions and/or
+              flashcard & matching cards. */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label
+                htmlFor="arena-education"
+                className="text-sm font-bold tracking-tight text-ink-900"
+              >
+                Education level
+              </label>
+              <select
+                id="arena-education"
+                value={arenaEducation}
+                onChange={(e) => setArenaEducation(e.target.value)}
+                className="input mt-1.5"
+              >
+                <option value="" disabled>
+                  Choose your level…
+                </option>
+                <option value="Elementary School">Elementary School</option>
+                <option value="Middle School">Middle School</option>
+                <option value="High School">High School</option>
+                <option value="College / University">
+                  College / University
+                </option>
+                <option value="Adult learning">Adult learning</option>
+              </select>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                College games are harder than elementary ones.
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="arena-test-timing"
+                className="text-sm font-bold tracking-tight text-ink-900"
+              >
+                When is your test?
+              </label>
+              <select
+                id="arena-test-timing"
+                value={arenaTestTiming}
+                onChange={(e) => setArenaTestTiming(e.target.value)}
+                className="input mt-1.5"
+              >
+                <option value="" disabled>
+                  Choose when your test is…
+                </option>
+                <option value="Today">Today</option>
+                <option value="Tomorrow">Tomorrow</option>
+                <option value="In 2–3 days">In 2–3 days</option>
+                <option value="In a week">In a week</option>
+                <option value="In 2+ weeks">In 2+ weeks</option>
+                <option value="No test — just learning">
+                  No test — just learning
+                </option>
+              </select>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                A test tomorrow means rapid-fire, highest-yield facts.
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="arena-study-hours"
+                className="text-sm font-bold tracking-tight text-ink-900"
+              >
+                How long will you study?
+              </label>
+              <select
+                id="arena-study-hours"
+                value={arenaStudyHours}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setArenaStudyHours(v);
+                  const len = lengthForStudyHours(v);
+                  if (len) setGameLength(len);
+                }}
+                className="input mt-1.5"
+              >
+                <option value="" disabled>
+                  Choose your study time…
+                </option>
+                {STUDY_HOURS_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                A 30-minute session gets a fast, punchy game.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50">
+              <input
+                type="checkbox"
+                checked={includeQuiz}
+                onChange={(e) => setIncludeQuiz(e.target.checked)}
+                className="h-4 w-4 accent-indigo-600"
+              />
+              Include trivia questions
+            </label>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50">
+              <input
+                type="checkbox"
+                checked={includeConcepts}
+                onChange={(e) => setIncludeConcepts(e.target.checked)}
+                className="h-4 w-4 accent-indigo-600"
+              />
+              Include flashcards &amp; matching cards
+            </label>
+            <p className="w-full text-xs leading-relaxed text-ink-400">
+              The guide&apos;s &ldquo;Include Practice Quiz&rdquo; and
+              &ldquo;Extract Key Concepts&rdquo; — for the Arena. Turn both
+              off and the game keeps trivia questions (a game needs
+              something to play).
+            </p>
+          </div>
+          <div>
+            <label
+              htmlFor="arena-upload"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-ink-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50"
+            >
+              <FileUp className="h-4 w-4 text-brand-600" /> Upload files
+            </label>
+            <input
+              id="arena-upload"
+              type="file"
+              accept=".pdf,.txt,.md,.csv"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void handleArenaUpload(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <span className="ml-2 text-xs leading-relaxed text-ink-400">
+              .pdf, .txt, .md, .csv — the game is built from your files too.
+              Your files are never published.
+            </span>
+            {arenaFileNotice && (
+              <p className="feedback-wrong mt-2">{arenaFileNotice}</p>
+            )}
+            {arenaFiles.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {arenaFiles.map((f, i) => (
+                  <li
+                    key={`${f.name}-${i}`}
+                    className="flex items-center gap-2 text-sm text-ink-700"
+                  >
+                    <span className="truncate">
+                      {f.name} · {(f.size / 1024).toFixed(0)} KB
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setArenaFiles((prev) =>
+                          prev.filter((_, j) => j !== i)
+                        )
+                      }
+                      className="btn-ghost px-2 py-0.5 text-xs"
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <textarea
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
@@ -894,6 +1314,9 @@ export default function BattleArena({
             <p className="mt-1.5 text-xs text-ink-400">
               Standard is 20 questions. Marathon builds in two parts and can
               take a little longer.
+              {arenaStudyHours &&
+                lengthForStudyHours(arenaStudyHours) === gameLength &&
+                ` Length set from your ${studyHoursLabel(arenaStudyHours) ?? arenaStudyHours} — change it if you like.`}
             </p>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -931,6 +1354,22 @@ export default function BattleArena({
                 Three quick ideas for your topic — choose one and the AI will
                 finish the full {gameLength}-question game.
               </p>
+              {(arenaEducation || arenaTestTiming || arenaStudyHours) && (
+                <p className="mt-1 text-xs font-medium text-ink-400">
+                  Built for{arenaEducation ? ` ${arenaEducation}` : ""}
+                  {arenaTestTiming
+                    ? ` · test ${arenaTestTiming.toLowerCase()}`
+                    : ""}
+                  {arenaStudyHours
+                    ? ` · ${studyHoursLabel(arenaStudyHours) ?? arenaStudyHours}`
+                    : ""}
+                </p>
+              )}
+              {!user && (
+                <p className="mt-1 text-xs text-ink-400">
+                  Sign in to publish a game — playing works without it.
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1014,6 +1453,19 @@ export default function BattleArena({
                 >
                   <Play className="h-4 w-4" /> Choose this one
                 </button>
+                <button
+                  type="button"
+                  onClick={() => chooseTemplate(t, true)}
+                  disabled={loading || !user}
+                  className="btn-secondary mt-2 w-full justify-center"
+                  title={
+                    user
+                      ? "Build this game and publish it to Browse in one tap"
+                      : "Sign in to publish games"
+                  }
+                >
+                  <Globe className="h-4 w-4" /> Publish this game
+                </button>
               </article>
             ))}
           </div>
@@ -1091,6 +1543,11 @@ export default function BattleArena({
           {gameSavedNote && (
             <p className="mt-1 text-xs font-semibold text-emerald-700">
               {gameSavedNote}
+            </p>
+          )}
+          {publishNote && (
+            <p className="mt-1 text-xs font-semibold text-emerald-700">
+              {publishNote}
             </p>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
@@ -1456,6 +1913,53 @@ export default function BattleArena({
               Only Player 1&apos;s score goes on the shared board
               (that&apos;s you, the signed-in player) — the other
               players&apos; scores stay on this device.
+            </p>
+          )}
+          {/* One-tap publishing for the finished game. The game was
+              auto-saved when it was built, so Publish flips that exact
+              saved game public — no dialog, no re-typing. */}
+          {user && savedGameRowId && (
+            <div className="mx-auto mt-4 max-w-md">
+              {gamePublished ? (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <span className="chip-amber">
+                    <Check className="h-3.5 w-3.5" /> Published ✓
+                  </span>
+                  <button
+                    type="button"
+                    onClick={unpublishGame}
+                    disabled={publishingGame}
+                    className="btn-secondary"
+                  >
+                    <EyeOff className="h-4 w-4" /> Unpublish
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={publishGame}
+                  disabled={publishingGame}
+                  className="btn-primary"
+                >
+                  <Globe className="h-4 w-4" />
+                  {publishingGame ? "Publishing…" : "Publish this game"}
+                </button>
+              )}
+              <p className="mt-2 text-xs leading-relaxed text-ink-400">
+                Publishing makes this game public — anyone can play it from
+                Browse. Don&apos;t publish anything with personal information
+                in it.
+              </p>
+              {publishNote && (
+                <p className="mt-1 text-xs font-semibold text-emerald-700">
+                  {publishNote}
+                </p>
+              )}
+            </div>
+          )}
+          {!user && (
+            <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-ink-400">
+              Sign in to publish this game to Browse.
             </p>
           )}
           <div className="mt-5 flex flex-wrap justify-center gap-2">

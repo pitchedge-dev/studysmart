@@ -59,6 +59,10 @@ import type { GameData } from "./BattleArena";
 import type { FriendEntry } from "./Friends";
 import type { GenerateResult } from "@/app/page";
 import { studyHoursLabel } from "@/lib/studyTime";
+import {
+  buildArenaExportSourceFromRow,
+  type ArenaExportSource,
+} from "@/lib/arenaExport";
 import EmptyState from "./EmptyState";
 
 type Friend = FriendEntry;
@@ -116,6 +120,8 @@ export default function YourGuides({
   onOpenGuideDetail,
   onOpenGame,
   onGenerate,
+  onTurnGuideIntoArena,
+  onViewInBrowse,
 }: {
   user: AppUser | null;
   profile: Profile | null;
@@ -127,6 +133,14 @@ export default function YourGuides({
   onOpenGame: (game: GameData, topic: string) => void;
   /** Sends the user to Generate (empty-state button). */
   onGenerate?: () => void;
+  /** Optional direct handoff for "Turn into Battle Arena": when the
+   *  parent wires it, the export jumps straight to the Arena. When it
+   *  is absent, the export goes through the existing `onOpenGame` path
+   *  as a marker instead (see turnGuideIntoArena) — still one tap. */
+  onTurnGuideIntoArena?: (source: ArenaExportSource) => void;
+  /** Optional jump to the Browse section ("View in Browse" after
+   *  publishing). When absent, the notice says where to find it. */
+  onViewInBrowse?: () => void;
 }) {
   const [guides, setGuides] = useState<StudyGuideRow[]>([]);
   const [favorites, setFavorites] = useState<StudyGuideRow[]>([]);
@@ -136,7 +150,8 @@ export default function YourGuides({
   const [recipientProfiles, setRecipientProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [confirmPublish, setConfirmPublish] = useState<string | null>(null);
+  /** Row id of a guide/game whose Publish/Unpublish is in flight. */
+  const [publishingId, setPublishingId] = useState<string | null>(null);
   const [sendFor, setSendFor] = useState<StudyGuideRow | null>(null);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
@@ -380,6 +395,53 @@ export default function YourGuides({
     onOpenGuide(row.guide as unknown as GenerateResult, row.id);
   }
 
+  /** One-tap Publish / Unpublish for a guide or a game: no confirm
+   *  dialog, no re-typing — the button flips the row public (or
+   *  private again) and the list refreshes so the Published ✓ chip
+   *  shows immediately. The public-content warning lives as a
+   *  permanent line above the list instead of a blocking step. */
+  async function setRowPublic(row: StudyGuideRow, makePublic: boolean) {
+    if (publishingId) return;
+    setPublishingId(row.id);
+    const ok = await setGuidePublic(row.id, makePublic);
+    setPublishingId(null);
+    if (!ok) {
+      setNotice("Couldn't change that — please try again.");
+      return;
+    }
+    setNotice(
+      makePublic
+        ? "Published ✓ — it now appears in Browse."
+        : "Unpublished — it is private again."
+    );
+    refresh();
+  }
+
+  /** "Turn into Battle Arena": build a Battle Arena game FROM this
+   *  guide's actual content — its topic, modules, concepts and key
+   *  facts, plus the options it was made with — without retyping
+   *  anything. When the parent wired `onTurnGuideIntoArena`, that
+   *  jumps straight to the Arena; otherwise the guide goes through
+   *  the existing `onOpenGame` path as an export marker, which
+   *  BattleArena recognizes and builds the templates from. Either
+   *  way it is one tap. */
+  function turnGuideIntoArena(row: StudyGuideRow) {
+    const source = buildArenaExportSourceFromRow(row);
+    if (onTurnGuideIntoArena) {
+      onTurnGuideIntoArena(source);
+      return;
+    }
+    onOpenGame(
+      {
+        title: source.topic,
+        gameType: "Battle Arena",
+        questions: [],
+        exportSource: source,
+      } as GameData,
+      source.topic
+    );
+  }
+
   function openShared(row: SharedGuideRow) {
     const snap = row.guide_snapshot as Record<string, unknown>;
     if (snap.kind === "game" && snap.game) {
@@ -481,6 +543,11 @@ export default function YourGuides({
           generate are saved here automatically.
         </p>
         {notice && <p className="feedback-neutral mt-3">{notice}</p>}
+        <p className="mt-2 text-xs leading-relaxed text-ink-400">
+          Publishing makes a guide or game public — anyone can view it in
+          Browse. Don&apos;t publish anything with personal information in
+          it.
+        </p>
         {loading && (
           <p className="mt-4 flex items-center gap-2 text-sm text-ink-400">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading your guides…
@@ -766,51 +833,52 @@ export default function YourGuides({
                     <Wrench className="h-4 w-4" /> Edit with Builder Bot
                   </Link>
                 )}
-                {confirmPublish === row.id ? (
+                {row.kind !== "game" && (
+                  <button
+                    type="button"
+                    onClick={() => turnGuideIntoArena(row)}
+                    className="btn-secondary px-3 py-1.5 text-sm"
+                    title="Build a Battle Arena game from this guide's actual content — no retyping"
+                  >
+                    <Swords className="h-4 w-4" /> Turn into Battle Arena
+                  </button>
+                )}
+                {row.is_public ? (
                   <>
-                    <span className="inline-flex items-center rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">
-                      This will be public — anyone can view it. Don&apos;t
-                      publish anything with personal information in it.
+                    <span className="chip-amber">
+                      <Globe className="h-3 w-3" /> Published ✓
                     </span>
                     <button
                       type="button"
-                      onClick={async () => {
-                        await setGuidePublic(row.id, true);
-                        setConfirmPublish(null);
-                        setNotice("Published — it now appears in Browse.");
-                        refresh();
-                      }}
-                      className="btn-primary px-3 py-1.5 text-sm"
+                      onClick={() => void setRowPublic(row, false)}
+                      disabled={publishingId === row.id}
+                      className="btn-secondary px-3 py-1.5 text-sm"
                     >
-                      <Globe className="h-4 w-4" /> Yes, publish it
+                      <EyeOff className="h-4 w-4" /> Unpublish
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmPublish(null)}
-                      className="btn-ghost"
-                    >
-                      Cancel
-                    </button>
+                    {onViewInBrowse && (
+                      <button
+                        type="button"
+                        onClick={onViewInBrowse}
+                        className="btn-secondary px-3 py-1.5 text-sm"
+                      >
+                        <Globe className="h-4 w-4" /> View in Browse
+                      </button>
+                    )}
                   </>
-                ) : row.is_public ? (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await setGuidePublic(row.id, false);
-                      setNotice("Unpublished — it is private again.");
-                      refresh();
-                    }}
-                    className="btn-secondary px-3 py-1.5 text-sm"
-                  >
-                    <EyeOff className="h-4 w-4" /> Unpublish
-                  </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setConfirmPublish(row.id)}
+                    onClick={() => void setRowPublic(row, true)}
+                    disabled={publishingId === row.id}
                     className="btn-secondary px-3 py-1.5 text-sm"
                   >
-                    <Globe className="h-4 w-4" /> Publish
+                    {publishingId === row.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Globe className="h-4 w-4" />
+                    )}
+                    Publish
                   </button>
                 )}
                 <button
@@ -1079,6 +1147,16 @@ export default function YourGuides({
                   >
                     <Eye className="h-4 w-4" /> Open
                   </button>
+                  {row.kind !== "game" && (
+                    <button
+                      type="button"
+                      onClick={() => turnGuideIntoArena(row)}
+                      className="btn-secondary px-3 py-1.5 text-sm"
+                      title="Build a Battle Arena game from this guide's actual content — no retyping"
+                    >
+                      <Swords className="h-4 w-4" /> Turn into Battle Arena
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={async () => {
