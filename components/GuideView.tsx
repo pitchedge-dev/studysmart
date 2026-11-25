@@ -33,6 +33,8 @@ import SectionCheckpoint from "./SectionCheckpoint";
 import GuideVideos from "./GuideVideos";
 import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
+import MeetYourBots from "./MeetYourBots";
+import { studyHoursLabel } from "@/lib/studyTime";
 import type { GenerateResult } from "@/app/page";
 
 type QuizQuestion = {
@@ -560,6 +562,9 @@ export default function GuideView({
               {meta?.createdAt && <span>· {formatDate(meta.createdAt)}</span>}
               {meta?.educationLevel && <span>· {meta.educationLevel}</span>}
               {meta?.testTiming && <span>· Test: {meta.testTiming}</span>}
+              {studyHoursLabel(result.studyHours) && (
+                <span>· Built for a {studyHoursLabel(result.studyHours)}</span>
+              )}
               <span>· {readingMinutes} min read</span>
             </p>
           </div>
@@ -568,11 +573,11 @@ export default function GuideView({
               <button
                 type="button"
                 onClick={() => setBuilderBotOpenState(true)}
-                className="btn-primary px-3 py-1.5 text-sm"
+                className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-4 py-1.5 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600"
                 title="Builder Bot: ask for changes to this guide in plain words"
               >
                 <Wrench className="h-4 w-4" />
-                Builder Bot
+                Edit with Builder Bot
               </button>
             )}
             <button
@@ -592,11 +597,47 @@ export default function GuideView({
         </div>
       </div>
 
+      {/* Builder Bot, unmissable: a bright banner right under the title
+          for the guide owner, plus the three bots introduced up front. */}
+      {isOwner && guideId && (
+        <div className="mt-5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white shadow-lift sm:p-5">
+          <p className="flex items-center gap-2 text-base font-extrabold tracking-tight">
+            <Wrench className="h-5 w-5 shrink-0" /> Want this guide changed?
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-amber-50">
+            Builder Bot edits this guide in plain words — just tell it what to
+            fix, add, shorten or simplify. It confirms big changes, and you
+            can undo.
+          </p>
+          <button
+            type="button"
+            onClick={() => setBuilderBotOpenState(true)}
+            className="mt-3 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-extrabold text-amber-700 shadow-sm transition hover:bg-amber-50"
+          >
+            <Wrench className="h-4 w-4" /> Edit with Builder Bot
+          </button>
+        </div>
+      )}
+      <div className="mt-5">
+        <MeetYourBots
+          compact
+          onOpenBuilderBot={
+            isOwner && guideId
+              ? () => setBuilderBotOpenState(true)
+              : undefined
+          }
+        />
+      </div>
+
       {/* Mastery summary + study plan, from this user's real answers and
           the test date they gave. */}
       <div className="mt-6 space-y-4">
         <MasterySummary records={guideErrors.records} />
-        <StudyPlan testTiming={meta?.testTiming} modules={modules} />
+        <StudyPlan
+          testTiming={meta?.testTiming}
+          modules={modules}
+          studyHours={result.studyHours}
+        />
       </div>
 
       {/* Mobile contents — hidden in focus mode */}
@@ -1113,7 +1154,16 @@ export default function GuideView({
         guideId={guideId}
         isOwner={isOwner}
         userId={userId}
-        onGuideUpdated={(next) => onGuideUpdated?.(next)}
+        // Keep the study time on the guide when Builder Bot saves a new
+        // version — its schema does not carry the field, so without this
+        // merge the "Built for a 2-hour session" label would vanish
+        // after the first edit.
+        onGuideUpdated={(next) =>
+          onGuideUpdated?.({
+            ...next,
+            studyHours: next.studyHours ?? result.studyHours,
+          })
+        }
       />
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { CalendarDays } from "lucide-react";
+import { studyHoursLabel, studyHoursMinutes } from "@/lib/studyTime";
 
 /**
  * Study plan from the test date the user already gave (Coursera pattern).
@@ -38,12 +39,23 @@ function formatDay(date: Date): string {
 export default function StudyPlan({
   testTiming,
   modules,
+  studyHours,
 }: {
   testTiming: string | undefined;
   modules: Array<{ moduleNumber: number; title: string }>;
+  /** "How long will you study?" — sizes each day's session. */
+  studyHours?: string;
 }) {
   const days = testDaysFromTiming(testTiming);
   if (days === null || modules.length === 0) return null;
+
+  // Total study time, spread across the days until the test.
+  const totalMinutes = studyHoursMinutes(studyHours);
+  const hoursLabel = studyHoursLabel(studyHours);
+  const minutesPerDay =
+    totalMinutes !== null && days > 0
+      ? Math.max(5, Math.round(totalMinutes / days))
+      : null;
 
   if (days === 0) {
     return (
@@ -54,6 +66,7 @@ export default function StudyPlan({
         <p className="mt-2 text-sm leading-relaxed text-ink-600">
           Your test is today — skip to the cheat sheet and the final review,
           then work through the modules you feel least sure about.
+          {hoursLabel ? ` Built for a ${hoursLabel}.` : ""}
         </p>
       </div>
     );
@@ -83,6 +96,11 @@ export default function StudyPlan({
       <p className="mt-1 text-xs font-medium text-ink-400">
         {modules.length} module{modules.length === 1 ? "" : "s"} spread across{" "}
         {days} day{days === 1 ? "" : "s"} until your test ({testTiming}).
+        {hoursLabel
+          ? ` Built for a ${hoursLabel}${
+              minutesPerDay !== null ? ` — about ${minutesPerDay} min a day` : ""
+            }.`
+          : ""}
       </p>
       <ol className="mt-3 space-y-2">
         {plan.map((day) => (

@@ -30,6 +30,11 @@ import {
   PracticeGroupSchema,
   QuizQuestionSchema,
 } from "@/lib/guideSchema";
+import {
+  isValidStudyHours,
+  repairMinModules,
+  studyTimeGuidance,
+} from "@/lib/studyTime";
 
 // Simplified fallback shape, used once if the full shape fails to validate:
 // concepts + targeted practice only, no checkpoint / reasoning / core ideas.
@@ -161,13 +166,14 @@ function missingParts(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { text, images, includeQuiz, extractConcepts, educationLevel, testTiming } = body as {
+    const { text, images, includeQuiz, extractConcepts, educationLevel, testTiming, studyHours } = body as {
       text?: string;
       images?: string[];
       includeQuiz?: boolean;
       extractConcepts?: boolean;
       educationLevel?: string;
       testTiming?: string;
+      studyHours?: string;
     };
 
     const hasText = typeof text === "string" && text.trim().length > 0;
@@ -196,6 +202,11 @@ export async function POST(req: NextRequest) {
       (TEST_TIMINGS as readonly string[]).includes(testTiming)
         ? testTiming
         : undefined;
+    // "How long will you study?" — scales how deep the guide is. An
+    // unknown value (or "No set time") means standard depth, exactly as
+    // before; the validated value is echoed back so the app can show
+    // "Built for a 2-hour session" on the saved guide.
+    const hours = isValidStudyHours(studyHours) ? studyHours : undefined;
 
     const quizInstruction = includeQuiz
       ? "Also create multiple-choice practice questions (three or four options each) covering the material — at most 6, one per major concept — each with the correct answer and a detailed explanation."
@@ -203,7 +214,11 @@ export async function POST(req: NextRequest) {
     const conceptsInstruction = extractConcepts
       ? "Extract the key concepts as a short list of concise terms or phrases."
       : "Return an empty keyConcepts list.";
-    const tailoring = [levelGuidance(level), timingGuidance(timing)]
+    const tailoring = [
+      levelGuidance(level),
+      timingGuidance(timing),
+      studyTimeGuidance(hours),
+    ]
       .filter(Boolean)
       .join(" ");
 
@@ -364,7 +379,10 @@ export async function POST(req: NextRequest) {
       includeQuiz: !!includeQuiz,
     });
     if (missing.length > 0 && modelUsed && Date.now() - startedAt < 30000) {
-      const repairPrompt = `${systemPrompt} IMPORTANT — REPAIR: a previous attempt at this guide came back too thin (missing: ${missing.join("; ")}). Regenerate the COMPLETE guide from the supplied material, making sure it includes at least 3 modules with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Keep the same depth and quality standard as a normal generation.`;
+      // The repair minimum follows the study time, so a short-session
+      // guide is not "repaired" into a long one.
+      const minModules = repairMinModules(hours);
+      const repairPrompt = `${systemPrompt} IMPORTANT — REPAIR: a previous attempt at this guide came back too thin (missing: ${missing.join("; ")}). Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Keep the same depth and quality standard as a normal generation.`;
       try {
         const { object } = await generateObject({
           model: modelUsed,
@@ -402,6 +420,7 @@ export async function POST(req: NextRequest) {
       guideTitle: core.guideTitle,
       studyGuide: core.studyGuide,
       summary: core.summary,
+      studyHours: hours,
       keyTerms: core.keyTerms ?? [],
       keyConcepts: core.keyConcepts ?? [],
       modules: core.modules ?? [],

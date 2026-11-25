@@ -55,6 +55,7 @@ import {
 import type { GameData } from "./BattleArena";
 import type { FriendEntry } from "./Friends";
 import type { GenerateResult } from "@/app/page";
+import { studyHoursLabel } from "@/lib/studyTime";
 import EmptyState from "./EmptyState";
 
 type Friend = FriendEntry;
@@ -77,6 +78,13 @@ function titleOf(row: StudyGuideRow): string {
     (guide?.guideTitle as string | undefined) ||
     (guide?.title as string | undefined);
   return title || row.topic || (row.kind === "game" ? "Battle Arena game" : "Study guide");
+}
+
+/** "Built for a 2-hour session" — read from the saved guide JSON, where
+ *  /api/generate stores the study time the guide was built for. */
+function studyHoursOf(row: StudyGuideRow): string | null {
+  const guide = row.guide as Record<string, unknown> | null;
+  return studyHoursLabel(guide?.studyHours as string | undefined);
 }
 
 /** Small colored chip showing a guide's course (styling only — the
@@ -700,6 +708,7 @@ export default function YourGuides({
                     {row.kind === "game" ? "Battle Arena game" : "Study guide"}
                     {row.education_level ? ` · ${row.education_level}` : ""}
                     {row.test_timing ? ` · Test: ${row.test_timing}` : ""}
+                    {studyHoursOf(row) ? ` · Built for a ${studyHoursOf(row)}` : ""}
                     {` · ${formatDate(row.created_at)}`}
                     {row.is_public && (
                       <span className="chip-amber ml-2">
@@ -721,10 +730,10 @@ export default function YourGuides({
                 {row.kind !== "game" && (
                   <Link
                     href={`/guide/${row.id}?bot=1`}
-                    className="btn-secondary px-3 py-1.5 text-sm"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1.5 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600"
                     title="Builder Bot: ask for changes to this guide in plain words"
                   >
-                    <Wrench className="h-4 w-4" /> Builder Bot
+                    <Wrench className="h-4 w-4" /> Edit with Builder Bot
                   </Link>
                 )}
                 {confirmPublish === row.id ? (

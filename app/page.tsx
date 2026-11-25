@@ -30,6 +30,7 @@ import {
   User,
   Users,
   Wand2,
+  Wrench,
   X,
   XCircle,
 } from "lucide-react";
@@ -71,6 +72,9 @@ import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
 import GuideVideos from "@/components/GuideVideos";
 import FeedbackModal from "@/components/FeedbackModal";
+import WelcomeModal, { hasSeenWelcome } from "@/components/WelcomeModal";
+import MeetYourBots from "@/components/MeetYourBots";
+import { STUDY_HOURS_OPTIONS, studyHoursLabel } from "@/lib/studyTime";
 import AuthModal from "@/components/AuthModal";
 import YourGuides from "@/components/YourGuides";
 import Browse from "@/components/Browse";
@@ -108,6 +112,8 @@ export type GenerateResult = {
   guideTitle?: string;
   studyGuide: string;
   summary?: string;
+  /** "How long will you study?" — echoed back by /api/generate. */
+  studyHours?: string;
   keyTerms?: { term: string; definition: string }[];
   keyConcepts: string[];
   modules?: StudyModule[];
@@ -182,6 +188,9 @@ export default function Home() {
   const [extractConcepts, setExtractConcepts] = useState(true);
   const [educationLevel, setEducationLevel] = useState("");
   const [testTiming, setTestTiming] = useState("");
+  // "How long will you study?" — nothing pre-selected; no choice means
+  // standard depth. Scales how deep the generated guide is.
+  const [studyHours, setStudyHours] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -190,6 +199,17 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  // Row id of the just-generated guide once it is saved to the account —
+  // the post-generation Builder Bot banner links to it.
+  const [savedGuideId, setSavedGuideId] = useState<string | null>(null);
+
+  // Welcome popup: show once, the first time the app is opened. The
+  // flag lives in localStorage; the popup is reopenable from the header
+  // ("How it works") and the command palette ("Show welcome").
+  useEffect(() => {
+    if (!hasSeenWelcome()) setWelcomeOpen(true);
+  }, []);
 
   // Account / library state
   const [user, setUser] = useState<AppUser | null>(null);
@@ -489,6 +509,7 @@ export default function Home() {
         window.dispatchEvent(new Event("studysmart:open-style-picker")),
     },
     { id: "open-tutor", label: "Open AI tutor", group: "Actions", run: () => setTutorOpen(true) },
+    { id: "show-welcome", label: "Show welcome — how StudySMART works", group: "Help", run: () => setWelcomeOpen(true) },
   ];
 
   // AI Edit
@@ -725,6 +746,7 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setSaveNote(null);
+    setSavedGuideId(null);
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -736,6 +758,7 @@ export default function Home() {
           extractConcepts,
           educationLevel: educationLevel || undefined,
           testTiming: testTiming || undefined,
+          studyHours: studyHours || undefined,
         }),
       });
       const data = await res.json();
@@ -768,6 +791,9 @@ export default function Home() {
           quiz: generated.quiz,
           kind: "guide",
         });
+        // The saved row id powers the "Edit with Builder Bot" banner
+        // shown right under a fresh guide.
+        setSavedGuideId(saved?.id ?? null);
         setSaveNote(
           saved
             ? "Saved to Your Study Guides."
@@ -1081,6 +1107,13 @@ export default function Home() {
             </button>
             <button
               type="button"
+              onClick={() => setWelcomeOpen(true)}
+              className="hidden items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700 sm:inline-flex"
+            >
+              <Sparkles className="h-3.5 w-3.5" /> How it works
+            </button>
+            <button
+              type="button"
               onClick={() => setFeedbackOpen(true)}
               className="hidden items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700 sm:inline-flex"
             >
@@ -1134,6 +1167,16 @@ export default function Home() {
               type="button"
               onClick={() => {
                 setMenuOpen(false);
+                setWelcomeOpen(true);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
+            >
+              <Sparkles className="h-4 w-4" /> How it works
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
                 setFeedbackOpen(true);
               }}
               className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
@@ -1174,6 +1217,14 @@ export default function Home() {
               <Bot className="h-3.5 w-3.5" /> AI tutor
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Meet your bots — the three AI helpers, introduced up front on
+          the Generate landing page, not buried in menus. */}
+      {section === "generate" && !result && !loading && (
+        <div className="mt-6">
+          <MeetYourBots />
         </div>
       )}
 
@@ -1321,7 +1372,7 @@ export default function Home() {
             className="input mt-3 min-h-32 resize-y leading-relaxed"
           />
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div>
               <label
                 htmlFor="education-level"
@@ -1375,6 +1426,32 @@ export default function Home() {
               </select>
               <p className="mt-1 text-xs leading-relaxed text-ink-400">
                 Closer tests get a shorter, high-yield guide.
+              </p>
+            </div>
+            <div>
+              <label
+                htmlFor="study-hours"
+                className="text-sm font-bold tracking-tight text-ink-900"
+              >
+                How long will you study?
+              </label>
+              <select
+                id="study-hours"
+                value={studyHours}
+                onChange={(e) => setStudyHours(e.target.value)}
+                className="input mt-1.5"
+              >
+                <option value="" disabled>
+                  Choose your study time…
+                </option>
+                {STUDY_HOURS_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs leading-relaxed text-ink-400">
+                Shorter sessions get a tighter guide; longer ones go deeper.
               </p>
             </div>
           </div>
@@ -1587,13 +1664,18 @@ export default function Home() {
                   <h1 className="text-3xl font-extrabold tracking-tight text-ink-900 sm:text-4xl">
                     {result.guideTitle}
                   </h1>
-                  {result.topicType && (
-                    <p className="mt-2">
+                  <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-500">
+                    {result.topicType && (
                       <span className="chip capitalize">
                         {result.topicType}
                       </span>
-                    </p>
-                  )}
+                    )}
+                    {studyHoursLabel(result.studyHours) && (
+                      <span className="chip">
+                        Built for a {studyHoursLabel(result.studyHours)}
+                      </span>
+                    )}
+                  </p>
                 </div>
               )}
               {!result.guideTitle && result.topicType && (
@@ -1608,8 +1690,43 @@ export default function Home() {
                 </p>
               )}
 
+              {/* Builder Bot, unmissable, right after a guide is made:
+                  a bright banner with one big button. It needs the saved
+                  guide, so signed-out users get the sign-in nudge instead. */}
+              {savedGuideId ? (
+                <div className="rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white shadow-lift sm:p-5">
+                  <p className="flex items-center gap-2 text-base font-extrabold tracking-tight">
+                    <Wrench className="h-5 w-5 shrink-0" /> Want this guide changed?
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-amber-50">
+                    Builder Bot edits this guide in plain words — just tell it
+                    what to fix, add, shorten or simplify.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/guide/${savedGuideId}?bot=1`)}
+                    className="mt-3 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-extrabold text-amber-700 shadow-sm transition hover:bg-amber-50"
+                  >
+                    <Wrench className="h-4 w-4" /> Edit with Builder Bot
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-sm leading-relaxed text-ink-700">
+                  <strong className="font-bold">Want this guide changed?</strong>{" "}
+                  Sign in to save it — then Builder Bot can edit it in plain
+                  words, right from Your Study Guides.
+                  <button
+                    type="button"
+                    onClick={() => setAuthOpen(true)}
+                    className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-amber-600"
+                  >
+                    Sign in
+                  </button>
+                </div>
+              )}
+
               <MasterySummary records={guideErrors.records} />
-              <StudyPlan testTiming={testTiming} modules={modules} />
+              <StudyPlan testTiming={testTiming} modules={modules} studyHours={result.studyHours} />
 
               {result.summary && (
                 <div className="card p-5 sm:p-6">
@@ -2390,6 +2507,11 @@ export default function Home() {
         open={feedbackOpen}
         onClose={() => setFeedbackOpen(false)}
         topic={result?.guideTitle ?? (inputText.trim() ? inputText.trim() : undefined)}
+      />
+
+      <WelcomeModal
+        open={welcomeOpen}
+        onClose={() => setWelcomeOpen(false)}
       />
 
       <AuthModal
