@@ -91,7 +91,7 @@ export default function FeedbackModal({
       onClick={onClose}
     >
       <div
-        className="card animate-pop w-full max-w-md overflow-hidden"
+        className="card animate-pop max-h-[90dvh] w-full max-w-md overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="h-1.5 w-full bg-gradient-to-r from-brand-500 via-brand-400 to-accent-400" />

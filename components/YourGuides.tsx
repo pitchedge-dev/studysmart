@@ -581,7 +581,7 @@ export default function YourGuides({
               type="button"
               onClick={createCourse}
               disabled={!normalizeCourseName(newCourseName)}
-              className="btn-secondary px-3 py-1.5 text-sm"
+              className="btn-secondary px-3 py-2 text-sm"
             >
               <Plus className="h-4 w-4" /> New course
             </button>
@@ -820,14 +820,14 @@ export default function YourGuides({
                 <button
                   type="button"
                   onClick={() => openGuide(row)}
-                  className="btn-primary px-3 py-1.5 text-sm"
+                  className="btn-primary px-3 py-2 text-sm"
                 >
                   <Eye className="h-4 w-4" /> Open
                 </button>
                 {row.kind !== "game" && (
                   <Link
                     href={`/guide/${row.id}?bot=1`}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1.5 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600"
                     title="Builder Bot: ask for changes to this guide in plain words"
                   >
                     <Wrench className="h-4 w-4" /> Edit with Builder Bot
@@ -837,7 +837,7 @@ export default function YourGuides({
                   <button
                     type="button"
                     onClick={() => turnGuideIntoArena(row)}
-                    className="btn-secondary px-3 py-1.5 text-sm"
+                    className="btn-secondary px-3 py-2 text-sm"
                     title="Build a Battle Arena game from this guide's actual content — no retyping"
                   >
                     <Swords className="h-4 w-4" /> Turn into Battle Arena
@@ -852,7 +852,7 @@ export default function YourGuides({
                       type="button"
                       onClick={() => void setRowPublic(row, false)}
                       disabled={publishingId === row.id}
-                      className="btn-secondary px-3 py-1.5 text-sm"
+                      className="btn-secondary px-3 py-2 text-sm"
                     >
                       <EyeOff className="h-4 w-4" /> Unpublish
                     </button>
@@ -860,7 +860,7 @@ export default function YourGuides({
                       <button
                         type="button"
                         onClick={onViewInBrowse}
-                        className="btn-secondary px-3 py-1.5 text-sm"
+                        className="btn-secondary px-3 py-2 text-sm"
                       >
                         <Globe className="h-4 w-4" /> View in Browse
                       </button>
@@ -871,7 +871,7 @@ export default function YourGuides({
                     type="button"
                     onClick={() => void setRowPublic(row, true)}
                     disabled={publishingId === row.id}
-                    className="btn-secondary px-3 py-1.5 text-sm"
+                    className="btn-secondary px-3 py-2 text-sm"
                   >
                     {publishingId === row.id ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -887,7 +887,7 @@ export default function YourGuides({
                     setSendFor(row);
                     setSendTo("");
                   }}
-                  className="btn-secondary px-3 py-1.5 text-sm"
+                  className="btn-secondary px-3 py-2 text-sm"
                 >
                   <Send className="h-4 w-4" /> Send to friend
                 </button>
@@ -900,7 +900,7 @@ export default function YourGuides({
                     setCourseMenuNew(false);
                     setCourseMenuNewName("");
                   }}
-                  className="btn-secondary px-3 py-1.5 text-sm"
+                  className="btn-secondary px-3 py-2 text-sm"
                   aria-expanded={courseMenuFor === row.id}
                 >
                   <Folder className="h-4 w-4" /> Course
@@ -980,7 +980,7 @@ export default function YourGuides({
                           if (clean) assignCourse(row, clean);
                         }}
                         disabled={!normalizeCourseName(courseMenuNewName)}
-                        className="btn-primary px-3 py-1.5 text-sm"
+                        className="btn-primary px-3 py-2 text-sm"
                       >
                         <Plus className="h-4 w-4" /> Create &amp; move
                       </button>
@@ -1083,7 +1083,7 @@ export default function YourGuides({
                           type="button"
                           onClick={() => void doSend()}
                           disabled={!sendTo || sending}
-                          className="btn-primary px-3 py-1.5 text-sm"
+                          className="btn-primary px-3 py-2 text-sm"
                         >
                           {sending && (
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1143,7 +1143,7 @@ export default function YourGuides({
                   <button
                     type="button"
                     onClick={() => openGuide(row)}
-                    className="btn-primary px-3 py-1.5 text-sm"
+                    className="btn-primary px-3 py-2 text-sm"
                   >
                     <Eye className="h-4 w-4" /> Open
                   </button>
@@ -1151,7 +1151,7 @@ export default function YourGuides({
                     <button
                       type="button"
                       onClick={() => turnGuideIntoArena(row)}
-                      className="btn-secondary px-3 py-1.5 text-sm"
+                      className="btn-secondary px-3 py-2 text-sm"
                       title="Build a Battle Arena game from this guide's actual content — no retyping"
                     >
                       <Swords className="h-4 w-4" /> Turn into Battle Arena
@@ -1163,7 +1163,7 @@ export default function YourGuides({
                       await removeFavorite(user.id, row.id);
                       refresh();
                     }}
-                    className="btn-secondary px-3 py-1.5 text-sm"
+                    className="btn-secondary px-3 py-2 text-sm"
                   >
                     <Heart className="h-4 w-4" /> Unfavorite
                   </button>
@@ -1179,7 +1179,7 @@ export default function YourGuides({
                         onClick={() =>
                           void addFriendById(row.user_id, row.author_name)
                         }
-                        className="btn-secondary px-3 py-1.5 text-sm"
+                        className="btn-secondary px-3 py-2 text-sm"
                       >
                         <UserPlus className="h-4 w-4" /> Add friend
                       </button>
@@ -1226,14 +1226,14 @@ export default function YourGuides({
                     <button
                       type="button"
                       onClick={() => openShared(row)}
-                      className="btn-primary px-3 py-1.5 text-sm"
+                      className="btn-primary px-3 py-2 text-sm"
                     >
                       <Eye className="h-4 w-4" /> Open
                     </button>
                     <button
                       type="button"
                       onClick={() => saveSharedToMine(row)}
-                      className="btn-secondary px-3 py-1.5 text-sm"
+                      className="btn-secondary px-3 py-2 text-sm"
                     >
                       <BookOpen className="h-4 w-4" /> Save to my guides
                     </button>
@@ -1253,7 +1253,7 @@ export default function YourGuides({
                               sender.display_name
                             )
                           }
-                          className="btn-secondary px-3 py-1.5 text-sm"
+                          className="btn-secondary px-3 py-2 text-sm"
                         >
                           <UserPlus className="h-4 w-4" /> Add friend
                         </button>

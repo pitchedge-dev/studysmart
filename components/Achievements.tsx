@@ -213,7 +213,7 @@ export default function Achievements({
               type="button"
               onClick={onDismissNew}
               aria-label="Dismiss new achievements"
-              className="shrink-0 rounded-full p-1.5 text-white/80 transition hover:bg-white/20 hover:text-white"
+              className="shrink-0 rounded-full p-2 text-white/80 transition hover:bg-white/20 hover:text-white"
             >
               <X className="h-5 w-5" />
             </button>

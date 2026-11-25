@@ -30,6 +30,7 @@ import {
   Trophy,
   Upload,
   User,
+  UserPlus,
   Users,
   Wand2,
   Wrench,
@@ -237,6 +238,19 @@ export default function Home() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authInitialMode, setAuthInitialMode] =
+    useState<"signin" | "signup">("signin");
+  // Open the account modal on a specific tab — "Sign in" for existing
+  // users, "Make an account" for new ones. The mode resets on every
+  // open, so a previous choice never leaks into the next one.
+  function openSignIn() {
+    setAuthInitialMode("signin");
+    setAuthOpen(true);
+  }
+  function openSignUp() {
+    setAuthInitialMode("signup");
+    setAuthOpen(true);
+  }
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [savedGame, setSavedGame] = useState<{
     game: GameData;
@@ -570,6 +584,7 @@ export default function Home() {
     },
     { id: "open-tutor", label: "Open AI tutor", group: "Actions", run: () => setTutorOpen(true) },
     { id: "show-welcome", label: "Show welcome — how StudySMART works", group: "Help", run: () => setWelcomeOpen(true) },
+    { id: "give-feedback", label: "Give feedback", group: "Help", run: () => setFeedbackOpen(true) },
   ];
 
   // AI Edit
@@ -1143,11 +1158,11 @@ export default function Home() {
             aria-label="StudySMART home"
             className="flex shrink-0 items-center gap-2.5"
           >
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow">
-              <GraduationCap className="h-6 w-6" />
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-glow sm:h-10 sm:w-10">
+              <GraduationCap className="h-5 w-5 sm:h-6 sm:w-6" />
             </span>
-            <span className="text-left">
-              <span className="block text-xl font-extrabold leading-tight tracking-tight">
+            <span className="text-left max-[359px]:hidden">
+              <span className="block text-lg font-extrabold leading-tight tracking-tight sm:text-xl">
                 Study<span className="gradient-text">SMART</span>
               </span>
               <span className="hidden text-xs font-medium text-ink-400 lg:block">
@@ -1156,17 +1171,97 @@ export default function Home() {
             </span>
           </button>
 
-          <nav
-            aria-label="Sections"
-            className="ml-2 hidden items-center gap-1 md:flex"
-          >
+          <div className="ml-auto flex items-center gap-2">
+            <div className="hidden sm:block">
+              <StreakWidget
+                streak={activity.streak}
+                xp={activity.xp}
+                todayAnswered={activity.today.questionsAnswered}
+                todayCorrect={activity.today.questionsCorrect}
+              />
+            </div>
+            {/* Command palette + style picker live in the header on
+                tablet and desktop. On phones they are hidden to keep the
+                header fitting — the palette is keyboard-first, and the
+                style picker also lives in the Account modal. */}
+            <div className="hidden md:block">
+              <CommandPalette actions={paletteActions} shortcuts={SHORTCUTS} />
+            </div>
+            <div className="hidden lg:block">
+              <ThemePicker
+                style={style}
+                onStyleChange={setStyle}
+                userId={user?.id ?? null}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={toggleDark}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-ink-200 bg-white p-2 text-ink-600 shadow-sm transition hover:border-brand-300 hover:text-brand-700"
+            >
+              {darkMode ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={openSignIn}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
+            >
+              <User className="h-3.5 w-3.5" />
+              <span className="max-w-16 truncate sm:max-w-24">
+                {user ? (profile?.display_name ?? "Account") : "Sign in"}
+              </span>
+            </button>
+            {!user && (
+              <button
+                type="button"
+                onClick={openSignUp}
+                className="btn-primary hidden min-h-11 px-4 py-2 text-xs lg:inline-flex"
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Make an account
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-ink-200 bg-white p-2 text-ink-600 shadow-sm transition hover:border-brand-300 hover:text-brand-700 lg:hidden"
+            >
+              {menuOpen ? (
+                <X className="h-5 w-5" />
+              ) : (
+                <Menu className="h-5 w-5" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2 — section navigation. It lives on its own row because
+            the 8 links (~974px) plus the header controls (~900px) could
+            never fit on one row inside the 1024px container — the old
+            single row overflowed the page by ~1,100px at every width
+            from iPad portrait up. Shown where it fits (lg+); below that
+            the hamburger menu is the navigation. Horizontally scrollable
+            as a backstop so a few extra pixels never push the page
+            sideways again. */}
+        <nav
+          aria-label="Sections"
+          className="hidden border-t border-ink-100/80 lg:block"
+        >
+          <div className="mx-auto flex max-w-5xl items-center gap-1 overflow-x-auto px-4 py-1.5 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {NAV_LINKS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => goToSection(id)}
                 aria-current={section === id ? "page" : undefined}
-                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-2.5 text-sm font-semibold transition ${
                   section === id
                     ? "bg-brand-50 text-brand-700 ring-1 ring-inset ring-brand-100"
                     : "text-ink-500 hover:bg-ink-100/70 hover:text-ink-900"
@@ -1180,91 +1275,33 @@ export default function Home() {
                 )}
               </button>
             ))}
-          </nav>
-
-          <div className="ml-auto flex items-center gap-2">
-            <div className="hidden sm:block">
-              <StreakWidget
-                streak={activity.streak}
-                xp={activity.xp}
-                todayAnswered={activity.today.questionsAnswered}
-                todayCorrect={activity.today.questionsCorrect}
-              />
-            </div>
-            <CommandPalette actions={paletteActions} shortcuts={SHORTCUTS} />
-            <ThemePicker
-              style={style}
-              onStyleChange={setStyle}
-              userId={user?.id ?? null}
-            />
-            <button
-              type="button"
-              onClick={toggleDark}
-              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-              title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-              className="inline-flex items-center justify-center rounded-full border border-ink-200 bg-white p-2 text-ink-600 shadow-sm transition hover:border-brand-300 hover:text-brand-700"
-            >
-              {darkMode ? (
-                <Sun className="h-4 w-4" />
-              ) : (
-                <Moon className="h-4 w-4" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setAuthOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700"
-            >
-              <User className="h-3.5 w-3.5" />
-              <span className="max-w-24 truncate sm:max-w-none">
-                {user ? (profile?.display_name ?? "Account") : "Sign in"}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setWelcomeOpen(true)}
-              className="hidden items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700 sm:inline-flex"
-            >
-              <Sparkles className="h-3.5 w-3.5" /> How it works
-            </button>
-            <button
-              type="button"
-              onClick={() => setFeedbackOpen(true)}
-              className="hidden items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 shadow-sm transition hover:border-brand-300 hover:bg-brand-50/50 hover:text-brand-700 sm:inline-flex"
-            >
-              <MessageSquareHeart className="h-3.5 w-3.5" /> Give feedback
-            </button>
-            <span className="chip-amber hidden xl:inline-flex">
-              <Sparkles className="h-3.5 w-3.5" /> Generated on demand
-            </span>
-            <button
-              type="button"
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label={menuOpen ? "Close menu" : "Open menu"}
-              aria-expanded={menuOpen}
-              className="inline-flex items-center justify-center rounded-full border border-ink-200 bg-white p-2 text-ink-600 shadow-sm transition hover:border-brand-300 hover:text-brand-700 md:hidden"
-            >
-              {menuOpen ? (
-                <X className="h-5 w-5" />
-              ) : (
-                <Menu className="h-5 w-5" />
-              )}
-            </button>
           </div>
-        </div>
+        </nav>
 
         {menuOpen && (
           <nav
             aria-label="Sections"
-            className="border-t border-ink-100 bg-white px-4 py-2 md:hidden"
+            className="border-t border-ink-100 bg-white px-4 py-2 lg:hidden"
           >
+            {!user && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  openSignUp();
+                }}
+                className="btn-primary mt-1 w-full justify-center"
+              >
+                <UserPlus className="h-4 w-4" /> Make an account
+              </button>
+            )}
             {NAV_LINKS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => goToSection(id)}
                 aria-current={section === id ? "page" : undefined}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                className={`mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-sm font-semibold transition ${
                   section === id
                     ? "bg-brand-50 text-brand-700"
                     : "text-ink-600 hover:bg-ink-100/70"
@@ -1284,7 +1321,7 @@ export default function Home() {
                 setMenuOpen(false);
                 setWelcomeOpen(true);
               }}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
+              className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
             >
               <Sparkles className="h-4 w-4" /> How it works
             </button>
@@ -1294,7 +1331,7 @@ export default function Home() {
                 setMenuOpen(false);
                 setFeedbackOpen(true);
               }}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
+              className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-sm font-semibold text-ink-600 transition hover:bg-ink-100/70"
             >
               <MessageSquareHeart className="h-4 w-4" /> Give feedback
             </button>
@@ -1332,6 +1369,21 @@ export default function Home() {
               <Bot className="h-3.5 w-3.5" /> AI tutor
             </span>
           </div>
+          {!user && (
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={openSignUp}
+                className="btn-primary px-6 py-3 text-base"
+              >
+                <UserPlus className="h-4 w-4" /> Make an account
+              </button>
+              <p className="mt-2 text-sm font-medium text-ink-400">
+                Free — save your guides, keep your streak, and play with
+                friends.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1645,7 +1697,7 @@ export default function Home() {
                     onClick={() =>
                       setImages((prev) => prev.filter((_, idx) => idx !== i))
                     }
-                    className="absolute -right-1.5 -top-1.5 rounded-full bg-ink-900 p-1 text-white shadow-md transition hover:bg-rose-600"
+                    className="absolute -right-1.5 -top-1.5 rounded-full bg-ink-900 p-2 text-white shadow-md transition hover:bg-rose-600"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -1675,7 +1727,7 @@ export default function Home() {
                     type="button"
                     aria-label={`Remove ${f.name}`}
                     onClick={() => removeUploadedFile(i)}
-                    className="rounded-full p-1 text-ink-400 hover:bg-rose-50 hover:text-rose-600"
+                    className="rounded-full p-2 text-ink-400 hover:bg-rose-50 hover:text-rose-600"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -1836,7 +1888,7 @@ export default function Home() {
                   words, right from Your Study Guides.
                   <button
                     type="button"
-                    onClick={() => setAuthOpen(true)}
+                    onClick={openSignIn}
                     className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-amber-600"
                   >
                     Sign in
@@ -1857,7 +1909,7 @@ export default function Home() {
                       .getElementById(id)
                       ?.scrollIntoView({ behavior: "smooth" })
                   }
-                  stickyTopClass="top-[72px]"
+                  stickyTopClass="top-[72px] lg:top-[130px]"
                 />
               )}
 
@@ -2659,7 +2711,7 @@ export default function Home() {
               headline="Friends live here"
               outcome="Sign in to find friends by username, accept friend requests, and send study guides to your friends."
               buttonLabel="Sign in"
-              onAction={() => setAuthOpen(true)}
+              onAction={openSignIn}
             />
           )}
         </section>
@@ -2733,6 +2785,7 @@ export default function Home() {
       <AuthModal
         open={authOpen}
         onClose={() => setAuthOpen(false)}
+        initialMode={authInitialMode}
         user={user}
         profile={profile}
         onAuthChanged={refreshAuth}

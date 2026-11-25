@@ -58,7 +58,7 @@ export default function GuideNavBar({
           type="button"
           onClick={onBack}
           title="Back to Your Study Guides"
-          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-2 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
         >
           <ArrowLeft className="h-4 w-4" />
           <span className="hidden sm:inline">Guides</span>
@@ -67,7 +67,7 @@ export default function GuideNavBar({
         <Link
           href={backHref ?? "/"}
           title="Back to Your Study Guides"
-          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-2 text-sm font-bold text-ink-600 transition hover:bg-ink-100/70 hover:text-brand-700"
         >
           <ArrowLeft className="h-4 w-4" />
           <span className="hidden sm:inline">Guides</span>
@@ -95,7 +95,7 @@ export default function GuideNavBar({
               onClick={() => onNavigate(s.id)}
               title={s.label}
               aria-current={active ? "true" : undefined}
-              className={`shrink-0 rounded-lg px-2.5 py-1.5 text-sm transition ${
+              className={`shrink-0 rounded-lg px-2.5 py-2 text-sm transition ${
                 active
                   ? "bg-brand-50 font-bold text-brand-700"
                   : "font-medium text-ink-600 hover:bg-ink-100/70 hover:text-ink-900"

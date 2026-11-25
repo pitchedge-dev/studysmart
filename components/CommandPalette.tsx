@@ -141,7 +141,7 @@ export default function CommandPalette({
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Jump to a section, open a guide, toggle dark mode…"
                 aria-label="Search commands"
-                className="w-full bg-transparent text-sm outline-none placeholder:text-ink-400"
+                className="w-full bg-transparent text-base outline-none sm:text-sm placeholder:text-ink-400"
               />
               <kbd className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-bold text-ink-500">
                 ESC

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, LogOut, User, X } from "lucide-react";
 import {
   getProfileByUsername,
@@ -46,6 +46,7 @@ export default function AuthModal({
   onAuthChanged,
   style,
   onStyleChange,
+  initialMode = "signin",
 }: {
   open: boolean;
   onClose: () => void;
@@ -54,6 +55,11 @@ export default function AuthModal({
   onAuthChanged: () => void;
   style: StyleId;
   onStyleChange: (id: StyleId) => void;
+  /**
+   * Which tab the modal opens on. "Make an account" buttons open it on
+   * "signup"; the header "Sign in" button opens it on "signin".
+   */
+  initialMode?: "signin" | "signup";
 }) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -62,6 +68,15 @@ export default function AuthModal({
   const [displayName, setDisplayName] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Every open starts on the tab the caller asked for, and clears any
+  // leftover message from a previous open.
+  useEffect(() => {
+    if (open) {
+      setMode(initialMode);
+      setMessage(null);
+    }
+  }, [open, initialMode]);
 
   if (!open) return null;
 
@@ -155,11 +170,11 @@ export default function AuthModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/50 p-4 backdrop-blur-sm sm:items-center"
       onClick={onClose}
     >
       <div
-        className="card animate-pop w-full max-w-md p-6 shadow-lift"
+        className="card my-auto max-h-[90dvh] w-full max-w-md overflow-y-auto p-6 shadow-lift animate-pop"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -170,7 +185,7 @@ export default function AuthModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-full p-1.5 text-ink-400 hover:bg-ink-100"
+            className="rounded-full p-2 text-ink-400 hover:bg-ink-100"
           >
             <X className="h-5 w-5" />
           </button>

@@ -287,7 +287,7 @@ export default function ProgressDashboard({
                   setGoalKind(k);
                   setGoalTarget(WEEKLY_GOAL_PRESETS[k][1]);
                 }}
-                className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-900"
+                className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-base font-semibold text-ink-900 sm:text-sm"
                 aria-label="Goal type"
               >
                 {(Object.keys(WEEKLY_GOAL_LABELS) as WeeklyGoalKind[]).map(
