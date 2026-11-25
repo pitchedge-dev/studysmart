@@ -15,6 +15,7 @@ import {
   ListTree,
   Search,
   Sparkles,
+  Wrench,
   XCircle,
 } from "lucide-react";
 import TargetedPractice, { type StudyModule } from "./TargetedPractice";
@@ -31,6 +32,7 @@ import ShowYourReasoning from "./ShowYourReasoning";
 import SectionCheckpoint from "./SectionCheckpoint";
 import GuideVideos from "./GuideVideos";
 import TutorPanel from "./TutorPanel";
+import BuilderBot from "./BuilderBot";
 import type { GenerateResult } from "@/app/page";
 
 type QuizQuestion = {
@@ -72,6 +74,17 @@ export default function GuideView({
   backHref = "/",
   guideKey = null,
   userId = null,
+  /** The saved row id — Builder Bot needs it to save edits. Null for
+   *  unsaved in-session guides (no bot there). */
+  guideId = null,
+  /** True only when the signed-in user owns this guide. Builder Bot
+   *  only ever edits the owner's own guides. */
+  isOwner = false,
+  /** Called with the updated guide after Builder Bot saves a change,
+   *  so the page re-renders with the new content. */
+  onGuideUpdated,
+  /** Open Builder Bot on first render (from ?bot=1). */
+  builderBotOpen = false,
 }: {
   result: GenerateResult;
   meta?: {
@@ -91,6 +104,10 @@ export default function GuideView({
    */
   guideKey?: string | null;
   userId?: string | null;
+  guideId?: string | null;
+  isOwner?: boolean;
+  onGuideUpdated?: (guide: GenerateResult) => void;
+  builderBotOpen?: boolean;
 }) {
   const modules: StudyModule[] = result.modules ?? [];
   const quiz: QuizQuestion[] = result.quiz ?? [];
@@ -118,6 +135,19 @@ export default function GuideView({
     message: string;
     key: number;
   } | null>(null);
+
+  // Builder Bot — edits this guide in plain words. Only for the owner
+  // of a saved guide (guideId + isOwner); never on someone else's guide.
+  const [builderBotOpenState, setBuilderBotOpenState] = useState(builderBotOpen);
+
+  // When Builder Bot saves a new version, the guide content changes
+  // under this view — reset per-question state so old answers can't
+  // map onto changed questions.
+  useEffect(() => {
+    setAnswers({});
+    setPracticeProgress({ answered: 0, correct: 0 });
+    setCheckpointByModule({});
+  }, [result]);
 
   // Focus reading mode (Readwise pattern): hides the sidebar, narrows
   // the measure to ~65ch, larger type, warm key-term highlights.
@@ -534,6 +564,17 @@ export default function GuideView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {isOwner && guideId && (
+              <button
+                type="button"
+                onClick={() => setBuilderBotOpenState(true)}
+                className="btn-primary px-3 py-1.5 text-sm"
+                title="Builder Bot: ask for changes to this guide in plain words"
+              >
+                <Wrench className="h-4 w-4" />
+                Builder Bot
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setFocusMode((v) => !v)}
@@ -1064,6 +1105,15 @@ export default function GuideView({
         context={tutorContext}
         title={tutorTitle}
         prefill={tutorPrefill}
+      />
+      <BuilderBot
+        open={builderBotOpenState}
+        onClose={() => setBuilderBotOpenState(false)}
+        guide={result}
+        guideId={guideId}
+        isOwner={isOwner}
+        userId={userId}
+        onGuideUpdated={(next) => onGuideUpdated?.(next)}
       />
     </div>
   );

@@ -213,6 +213,36 @@ export async function deleteGuide(id: string): Promise<boolean> {
   return !error;
 }
 
+/**
+ * Update the saved content of a guide — used by Builder Bot after the
+ * student asks for a change. Owner-only: the update matches BOTH the
+ * guide id AND the signed-in user's id (and row-level security enforces
+ * the same), so a bot can never edit another user's guide, and a
+ * published guide can only be edited by its owner. The `quiz` column
+ * is updated alongside the guide JSON when the edit touched it.
+ */
+export async function updateGuideContent(args: {
+  id: string;
+  userId: string;
+  guide: Record<string, unknown>;
+  quiz?: unknown;
+}): Promise<boolean> {
+  const sb = getSupabase();
+  if (!sb) return false;
+  const patch: Record<string, unknown> = { guide: args.guide };
+  if (args.quiz !== undefined) patch.quiz = args.quiz;
+  const { error } = await sb
+    .from("study_guides")
+    .update(patch)
+    .eq("id", args.id)
+    .eq("user_id", args.userId);
+  if (error) {
+    console.error("[supabase] update guide failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
 export async function setGuidePublic(
   id: string,
   isPublic: boolean

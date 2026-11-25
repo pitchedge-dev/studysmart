@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   BookOpen,
   ChevronDown,
@@ -18,6 +19,7 @@ import {
   Swords,
   Trash2,
   Users,
+  Wrench,
 } from "lucide-react";
 import {
   addKnownCourse,
@@ -716,6 +718,15 @@ export default function YourGuides({
                 >
                   <Eye className="h-4 w-4" /> Open
                 </button>
+                {row.kind !== "game" && (
+                  <Link
+                    href={`/guide/${row.id}?bot=1`}
+                    className="btn-secondary px-3 py-1.5 text-sm"
+                    title="Builder Bot: ask for changes to this guide in plain words"
+                  >
+                    <Wrench className="h-4 w-4" /> Builder Bot
+                  </Link>
+                )}
                 {confirmPublish === row.id ? (
                   <>
                     <span className="inline-flex items-center rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">

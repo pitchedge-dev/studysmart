@@ -28,6 +28,18 @@ export default function GuidePage() {
   // The signed-in user, if any — error tracking on this guide copy is
   // private to them (their own weak spots only, never anyone else's).
   const [userId, setUserId] = useState<string | null>(null);
+  // "?bot=1" opens Builder Bot on first render (from Your Study Guides).
+  const [botOpen, setBotOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("bot") === "1") {
+        setBotOpen(true);
+      }
+    } catch {
+      // Ignore malformed URLs.
+    }
+  }, []);
 
   useEffect(() => {
     const sb = getSupabase();
@@ -165,6 +177,20 @@ export default function GuidePage() {
         }}
         guideKey={`guide:${row.id}`}
         userId={userId}
+        guideId={row.id}
+        isOwner={userId !== null && row.user_id === userId}
+        builderBotOpen={botOpen}
+        onGuideUpdated={(next) =>
+          setRow((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  guide: next as unknown as Record<string, unknown>,
+                  quiz: next.quiz ?? prev.quiz,
+                }
+              : prev
+          )
+        }
       />
     </div>
   );
