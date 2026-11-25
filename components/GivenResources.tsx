@@ -41,7 +41,7 @@ export default function GivenResources({
     <section
       id="given-resources"
       data-guide-section="given-resources"
-      className="scroll-mt-6"
+      className="scroll-mt-32"
     >
       <div className="card p-5 sm:p-6">
         <h2 className="flex items-center gap-2 text-base font-bold tracking-tight text-ink-900">

@@ -71,6 +71,8 @@ import Pronunciation from "@/components/Pronunciation";
 import ShowYourReasoning from "@/components/ShowYourReasoning";
 import SectionCheckpoint from "@/components/SectionCheckpoint";
 import GuideVideos from "@/components/GuideVideos";
+import GivenResources from "@/components/GivenResources";
+import type { GivenResource } from "@/lib/guideSchema";
 import GuideNavBar, { type GuideNavSection } from "@/components/GuideNavBar";
 import FeedbackModal from "@/components/FeedbackModal";
 import WelcomeModal, { hasSeenWelcome } from "@/components/WelcomeModal";
@@ -129,6 +131,8 @@ export type GenerateResult = {
   faq?: { question: string; answer: string }[];
   /** Final review quiz covering the whole guide. */
   finalReview?: { questions: QuizQuestion[] };
+  /** Materials the teacher gave for this unit (files uploaded when generating). */
+  givenResources?: GivenResource[];
 };
 
 type Section = "generate" | "my-guides" | "browse" | "arena" | "review" | "friends";
@@ -946,6 +950,9 @@ export default function Home() {
     ? [
         ...(result.guideTitle || result.summary
           ? [{ id: "overview", label: "Overview" }]
+          : []),
+        ...(result.givenResources && result.givenResources.length > 0
+          ? [{ id: "given-resources", label: "Given resources", shortLabel: "Resources" }]
           : []),
         ...(result.objectives && result.objectives.length > 0
           ? [{ id: "objectives", label: "What you'll learn", shortLabel: "Learn" }]
@@ -2287,6 +2294,8 @@ export default function Home() {
                   </div>
                 </div>
               )}
+
+              <GivenResources resources={result.givenResources} />
 
               <div
                 id="videos"
