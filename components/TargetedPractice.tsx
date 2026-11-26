@@ -208,6 +208,14 @@ export default function TargetedPractice({
               {group.problems.map((problem, pi) => {
                 const key = `${moduleIdx}-${groupIdx}-${pi}`;
                 const answer = answers[key];
+                // Multiple-choice problems show their options as
+                // clickable choices. The schema allows three OR four
+                // options — the old check demanded exactly four, so a
+                // 3-option question fell through to the free-text box
+                // despite its MULTIPLE-CHOICE label (live re-test
+                // 2026-11-26). Any problem with two or more options
+                // gets the choices; anything else keeps the text box.
+                const options = problem.options ?? [];
                 return (
                   <div key={pi} className="border-t border-ink-100 pt-5 first:border-t-0 first:pt-0">
                     <p className="eyebrow">
@@ -218,9 +226,9 @@ export default function TargetedPractice({
                       {problem.question}
                     </p>
 
-                    {problem.options && problem.options.length === 4 ? (
+                    {options.length >= 2 ? (
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        {problem.options.map((opt) => {
+                        {options.map((opt) => {
                           const isCorrect = opt === problem.correctAnswer;
                           const isPicked = answer?.picked === opt;
                           let cls =

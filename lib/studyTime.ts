@@ -80,19 +80,27 @@ export function studyHoursLabel(value: string | undefined): string | null {
  * tight but COMPLETE guide (never a stub — the material is still fully
  * covered, just concisely); long sessions get the full depth. No choice
  * (or "No set time") means standard depth, exactly as before.
+ *
+ * Every duration states a FLOOR as well as a ceiling ("at least N
+ * modules with at least M concepts each"). The old text said only
+ * "up to 6 modules with up to 6 concepts each", and the model read
+ * that as permission to stop at 1 module with 2 concepts — two live
+ * guides in a row came back that thin (2026-11-26), one for a
+ * 2-hour session. A floor tied to the session length keeps short
+ * guides tight without letting a long session come back as a stub.
  */
 export function studyTimeGuidance(value: string | undefined): string {
   switch (value) {
     case "30 minutes":
-      return "The student will study for 30 minutes: keep this guide tight — at most 2 modules with at most 3 concepts each, one practice problem per concept, explanations of one or two sentences. It must still be a COMPLETE guide covering the material — just concise, with the most important points first.";
+      return "The student will study for 30 minutes: keep this guide tight — at least 1 module with at least 2 concepts, at most 2 modules with at most 3 concepts each, one practice problem per concept, explanations of one or two sentences. It must still be a COMPLETE guide covering the material — just concise, with the most important points first.";
     case "1 hour":
-      return "The student will study for 1 hour: keep this guide focused — at most 3 modules with at most 4 concepts each, one or two practice problems per concept, and concise explanations. It must still be a COMPLETE guide covering the material.";
+      return "The student will study for 1 hour: keep this guide focused — at least 2 modules with at least 2 concepts each, at most 3 modules with at most 4 concepts each, one or two practice problems per concept, and concise explanations. It must still be a COMPLETE guide covering the material.";
     case "2 hours":
-      return "The student will study for 2 hours: give a standard-depth guide — up to 6 modules with up to 6 concepts each, two practice problems per concept, and full explanations.";
+      return "The student will study for 2 hours: give a standard-depth guide — at least 3 modules with at least 3 concepts each (9 or more concepts in total), up to 6 modules with up to 6 concepts each, two practice problems per concept, and full explanations.";
     case "3 hours":
-      return "The student will study for 3 hours: go deep — up to 6 modules with up to 6 concepts each, two practice problems per concept, extra worked examples, and full explanations.";
+      return "The student will study for 3 hours: go deep — at least 4 modules with at least 3 concepts each, up to 6 modules with up to 6 concepts each, two practice problems per concept, extra worked examples, and full explanations.";
     case "4+ hours":
-      return "The student will study for 4 or more hours: go as deep as the material supports — up to 6 modules with up to 6 concepts each, extra worked examples, and full practice (two problems per concept). This is the fullest version of the guide.";
+      return "The student will study for 4 or more hours: go as deep as the material supports — at least 4 modules with at least 3 concepts each, up to 6 modules with up to 6 concepts each, extra worked examples, and full practice (two problems per concept). This is the fullest version of the guide.";
     default:
       return "";
   }
@@ -104,4 +112,19 @@ export function repairMinModules(value: string | undefined): number {
   if (value === "30 minutes") return 1;
   if (value === "1 hour") return 2;
   return 3;
+}
+
+/**
+ * Depth floor for the self-check in /api/generate (see missingParts):
+ * the fewest modules and concepts a guide for this study time may
+ * have before it counts as thin and gets one repair attempt. The
+ * concept floor is at least 3 even for a 30-minute session — a guide
+ * with 1–2 concepts is a stub at any length.
+ */
+export function depthFloor(value: string | undefined): {
+  minModules: number;
+  minConcepts: number;
+} {
+  const minModules = repairMinModules(value);
+  return { minModules, minConcepts: Math.max(3, minModules * 2) };
 }

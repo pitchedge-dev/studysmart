@@ -61,11 +61,26 @@ export type MasterySummary = {
   familiar: number;
   proficient: number;
   mastered: number;
-  /** Share of attempted concepts that are mastered (0 when none attempted). */
+  /** Share of concepts that are mastered (0 when none attempted). */
   masteredShare: number;
 };
 
-export function masterySummary(records: GuideErrorRecord[]): MasterySummary {
+/**
+ * Summarize mastery from the user's real answers on one guide copy.
+ *
+ * `totalConcepts` is the guide's own concept count when the caller
+ * knows it. Without it the total is the number of attempted concepts
+ * — which made the summary read "0 of 1 concepts mastered" on a
+ * 2-concept guide after a single answer (live re-test 2026-11-26),
+ * while the guide header said 2 concepts. The denominator must be
+ * the guide's concepts, not the attempted ones: an unattempted
+ * concept is simply not mastered yet. The level buckets still count
+ * attempted concepts only.
+ */
+export function masterySummary(
+  records: GuideErrorRecord[],
+  totalConcepts?: number
+): MasterySummary {
   const summary: MasterySummary = {
     total: 0,
     attempted: 0,
@@ -77,12 +92,18 @@ export function masterySummary(records: GuideErrorRecord[]): MasterySummary {
   for (const r of records) {
     const level = masteryLevel(r);
     if (!level) continue;
-    summary.total += 1;
     if (level === "Attempted") summary.attempted += 1;
     if (level === "Familiar") summary.familiar += 1;
     if (level === "Proficient") summary.proficient += 1;
     if (level === "Mastered") summary.mastered += 1;
   }
+  summary.total =
+    typeof totalConcepts === "number"
+      ? totalConcepts
+      : summary.attempted +
+        summary.familiar +
+        summary.proficient +
+        summary.mastered;
   summary.masteredShare =
     summary.total > 0 ? summary.mastered / summary.total : 0;
   return summary;

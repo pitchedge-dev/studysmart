@@ -54,6 +54,11 @@ import { useActivity } from "@/lib/activity";
 import { computeAchievementStats, useAchievements } from "@/lib/achievements";
 import Achievements from "@/components/Achievements";
 import { dueCount as dueCountOf, loadAllErrors } from "@/lib/review";
+import {
+  hasEnrichment,
+  requestEnrichment,
+  type EnrichmentFields,
+} from "@/lib/enrichGuide";
 import { getTheme, toggleTheme } from "@/lib/theme";
 import {
   applyStyle,
@@ -387,6 +392,23 @@ export default function Home() {
   // background /api/enrich result can tell whether the student has
   // already generated a newer guide (and drop its own result then).
   const enrichmentTokenRef = useRef(0);
+  // Finishing-sections status for the guide on screen: while the
+  // background enrichment is running the guide shows a subtle
+  // "Adding finishing sections…" line; if every retry fails it shows
+  // a Retry button instead of silently leaving the sections out
+  // (2026-11-26: a one-shot background call failed and the five
+  // sections were permanently absent with nothing saying so).
+  const [enrichmentStatus, setEnrichmentStatus] = useState<
+    "idle" | "pending" | "done" | "failed"
+  >("idle");
+  // The notes/images the last enrichment ran on, so the Retry button
+  // can re-fire it for the same guide.
+  const lastEnrichInputRef = useRef<{
+    notes: string;
+    images: string[];
+    generated: GenerateResult;
+    savedId: string | null;
+  } | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -811,6 +833,12 @@ export default function Home() {
    * saved content so a Builder Bot edit made meanwhile is never
    * clobbered. The generation token drops the result when the student
    * has already generated a newer guide.
+   *
+   * The fetch retries transient failures (see lib/enrichGuide.ts):
+   * a one-shot call that fails once used to lose the five sections
+   * permanently and silently (live re-test 2026-11-26). Now a failed
+   * run sets the status to "failed" and the guide view offers a
+   * Retry button instead of leaving the sections out with no word.
    */
   async function enrichGuideInBackground(args: {
     notes: string;
@@ -819,40 +847,54 @@ export default function Home() {
     savedId: string | null;
     generation: number;
   }) {
-    try {
-      const res = await fetch("/api/enrich", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: args.notes, images: args.images }),
-      });
-      if (!res.ok) return;
-      const enrichment = (await res.json()) as Partial<GenerateResult>;
-      if (enrichmentTokenRef.current !== args.generation) return;
-      const fields = {
-        objectives: enrichment.objectives ?? [],
-        cheatSheet: enrichment.cheatSheet,
-        realWorldApplications: enrichment.realWorldApplications ?? [],
-        faq: enrichment.faq ?? [],
-        finalReview: enrichment.finalReview,
-      };
-      setResult((prev) =>
-        prev === args.generated ? { ...prev, ...fields } : prev
-      );
-      if (args.savedId && user) {
-        const current = await getGuideById(args.savedId);
-        if (!current) return;
-        const base = current.guide as unknown as GenerateResult;
-        const merged = { ...base, ...fields };
-        await updateGuideContent({
-          id: args.savedId,
-          userId: user.id,
-          guide: merged as unknown as Record<string, unknown>,
-          quiz: merged.quiz,
-        });
-      }
-    } catch {
-      // Best effort — the core guide already stands on its own.
+    lastEnrichInputRef.current = args;
+    setEnrichmentStatus("pending");
+    const enrichment = await requestEnrichment({
+      text: args.notes,
+      images: args.images,
+      isStale: () => enrichmentTokenRef.current !== args.generation,
+    });
+    if (!enrichment) {
+      // Stale (a newer guide was generated) or every retry failed.
+      // Only show "failed" when this is still the current guide —
+      // a stale result must stay silent.
+      if (enrichmentTokenRef.current === args.generation)
+        setEnrichmentStatus("failed");
+      return;
     }
+    if (enrichmentTokenRef.current !== args.generation) return;
+    const fields: EnrichmentFields = {
+      objectives: enrichment.objectives ?? [],
+      cheatSheet: enrichment.cheatSheet,
+      realWorldApplications: enrichment.realWorldApplications ?? [],
+      faq: enrichment.faq ?? [],
+      finalReview: enrichment.finalReview,
+    };
+    setResult((prev) =>
+      prev === args.generated ? { ...prev, ...fields } : prev
+    );
+    setEnrichmentStatus("done");
+    if (args.savedId && user) {
+      const current = await getGuideById(args.savedId);
+      if (!current) return;
+      const base = current.guide as unknown as GenerateResult;
+      const merged = { ...base, ...fields };
+      await updateGuideContent({
+        id: args.savedId,
+        userId: user.id,
+        guide: merged as unknown as Record<string, unknown>,
+        quiz: merged.quiz,
+      });
+    }
+  }
+
+  /** Re-run the finishing-sections fetch for the guide on screen —
+   *  the Retry button shown when the background enrichment failed. */
+  function retryEnrichment() {
+    const last = lastEnrichInputRef.current;
+    if (!last || enrichmentStatus === "pending") return;
+    const generation = ++enrichmentTokenRef.current;
+    void enrichGuideInBackground({ ...last, generation });
   }
 
   async function generate() {
@@ -996,6 +1038,22 @@ export default function Home() {
       ? `guide:${guideId}`
       : localGuideKey(saved.guideTitle ?? "Study guide", saved.studyGuide);
     setCurrentGuideId(guideKey);
+    // A saved guide that never got its finishing sections (the
+    // background enrichment failed when it was generated) gets them
+    // now, from the guide's own text — in the background, so opening
+    // the guide never waits on it.
+    if (hasEnrichment(saved)) {
+      setEnrichmentStatus("done");
+    } else {
+      const generation = ++enrichmentTokenRef.current;
+      void enrichGuideInBackground({
+        notes: saved.studyGuide,
+        images: [],
+        generated: saved,
+        savedId: guideId ?? null,
+        generation,
+      });
+    }
     activity.saveLastGuide({
       title: saved.guideTitle ?? "Study guide",
       guideId: guideId ?? null,
@@ -1975,6 +2033,37 @@ export default function Home() {
                 </div>
               )}
 
+              {/* Finishing sections (objectives, cheat sheet, FAQ,
+                  final review) arrive in the background after the core
+                  guide lands. While they are on their way the guide
+                  shows a subtle line; if every retry failed it offers
+                  a Retry button instead of silently leaving the
+                  sections out (live re-test 2026-11-26). */}
+              {enrichmentStatus === "pending" && (
+                <p className="flex items-center gap-2 text-sm font-medium text-ink-500">
+                  <Loader2 className="h-4 w-4 animate-spin text-brand-600" />
+                  Adding finishing sections — objectives, cheat sheet, FAQ…
+                </p>
+              )}
+              {enrichmentStatus === "failed" && (
+                <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-sm leading-relaxed text-ink-700">
+                  <p className="flex-1">
+                    <strong className="font-bold">
+                      Finishing sections couldn&apos;t load.
+                    </strong>{" "}
+                    The guide is complete without them — objectives, cheat
+                    sheet, FAQ and final review can be added now.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retryEnrichment}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-amber-600"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" /> Retry
+                  </button>
+                </div>
+              )}
+
               {result && inlineNavSections.length > 0 && (
                 <GuideNavBar
                   title={result.guideTitle ?? "Study Guide"}
@@ -2006,7 +2095,7 @@ export default function Home() {
                 finalReviewQuestions={result.finalReview?.questions}
               />
 
-              <MasterySummary records={guideErrors.records} />
+              <MasterySummary records={guideErrors.records} totalConcepts={totalCards} />
               <StudyPlan testTiming={testTiming} modules={modules} studyHours={result.studyHours} />
 
               {result.summary && (

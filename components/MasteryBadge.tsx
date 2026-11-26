@@ -38,11 +38,31 @@ export function MasteryBadge({ record }: { record: GuideErrorRecord | undefined 
 const LEVEL_ORDER: MasteryLevel[] = ["Attempted", "Familiar", "Proficient", "Mastered"];
 
 /** Per-guide mastery summary: a ring + counts per level, from the user's
- *  real answers on this guide copy. Renders nothing until something has
- *  been attempted. */
-export function MasterySummary({ records }: { records: GuideErrorRecord[] }) {
-  const summary = masterySummary(records);
-  if (summary.total === 0) return null;
+ *  real answers on this guide copy. `totalConcepts` is the guide's own
+ *  concept count — the denominator of "X of Y concepts mastered".
+ *  Without it the total falls back to attempted concepts only, which
+ *  undercounts the guide (live re-test 2026-11-26: "0 of 1" on a
+ *  2-concept guide). Renders nothing until something has been
+ *  attempted. */
+export function MasterySummary({
+  records,
+  totalConcepts,
+}: {
+  records: GuideErrorRecord[];
+  totalConcepts?: number;
+}) {
+  const summary = masterySummary(records, totalConcepts);
+  // Nothing attempted yet — no mastery to show. (The total may be
+  // the guide's concept count even so; the card still waits for a
+  // first answer.)
+  if (
+    summary.attempted +
+      summary.familiar +
+      summary.proficient +
+      summary.mastered ===
+    0
+  )
+    return null;
   const r = 26;
   const circumference = 2 * Math.PI * r;
   const masteredPct = Math.round(summary.masteredShare * 100);

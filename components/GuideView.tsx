@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
@@ -17,6 +17,7 @@ import {
   Lightbulb,
   ListTree,
   Loader2,
+  RotateCcw,
   Search,
   Send,
   Sparkles,
@@ -30,8 +31,13 @@ import {
   listFriendships,
   sendGuideToFriend,
   setGuidePublic,
+  updateGuideContent,
   type Profile,
 } from "@/lib/supabase";
+import {
+  hasEnrichment,
+  requestEnrichment,
+} from "@/lib/enrichGuide";
 import { initialsFor } from "@/lib/friends";
 import TargetedPractice, { type StudyModule } from "./TargetedPractice";
 import PersonalizedPractice from "./PersonalizedPractice";
@@ -203,6 +209,56 @@ export default function GuideView({
   // Builder Bot — edits this guide in plain words. Only for the owner
   // of a saved guide (guideId + isOwner); never on someone else's guide.
   const [builderBotOpenState, setBuilderBotOpenState] = useState(builderBotOpen);
+
+  // Finishing sections (objectives, cheat sheet, applications, FAQ,
+  // final review) for a guide that never got them. The standalone view
+  // used to have no enrich path at all (2026-11-26), so a guide whose
+  // background enrichment failed when it was generated could never
+  // gain the sections here. Owner only, once per guide: enrich from
+  // the guide's own text, persist to the saved row, and hand the
+  // merged guide to the parent so this view re-renders with them.
+  // While the sections are on their way the view shows a subtle
+  // line; if every retry failed it offers a Retry button instead of
+  // silently leaving the sections out.
+  const enrichAttemptedForRef = useRef<string | null>(null);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<
+    "idle" | "pending" | "done" | "failed"
+  >("idle");
+
+  async function runEnrichment(): Promise<boolean> {
+    if (!isOwner || !guideId || !userId) return false;
+    setEnrichmentStatus("pending");
+    const fields = await requestEnrichment({
+      text: result.studyGuide,
+      images: [],
+    });
+    if (!fields) {
+      setEnrichmentStatus("failed");
+      return false;
+    }
+    const merged = { ...result, ...fields };
+    await updateGuideContent({
+      id: guideId,
+      userId,
+      guide: merged as unknown as Record<string, unknown>,
+      quiz: merged.quiz,
+    });
+    setEnrichmentStatus("done");
+    onGuideUpdated?.(merged);
+    return true;
+  }
+
+  useEffect(() => {
+    if (!isOwner || !guideId || !userId) return;
+    if (hasEnrichment(result)) {
+      setEnrichmentStatus("done");
+      return;
+    }
+    if (enrichAttemptedForRef.current === guideId) return;
+    enrichAttemptedForRef.current = guideId;
+    void runEnrichment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideId, isOwner, userId]);
 
   // One-tap Publish / Unpublish for the guide owner. The published
   // state is read from the saved row (GuideView only gets the guide
@@ -888,6 +944,36 @@ export default function GuideView({
         />
       </div>
 
+      {/* Finishing sections arrive in the background (see the
+          enrich-on-open effect above). While they are on their way
+          the guide shows a subtle line; if every retry failed it
+          offers a Retry button instead of silently leaving the
+          sections out. */}
+      {enrichmentStatus === "pending" && (
+        <p className="mt-5 flex items-center gap-2 text-sm font-medium text-ink-500">
+          <Loader2 className="h-4 w-4 animate-spin text-brand-600" />
+          Adding finishing sections — objectives, cheat sheet, FAQ…
+        </p>
+      )}
+      {enrichmentStatus === "failed" && (
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-sm leading-relaxed text-ink-700">
+          <p className="flex-1">
+            <strong className="font-bold">
+              Finishing sections couldn&apos;t load.
+            </strong>{" "}
+            The guide is complete without them — objectives, cheat sheet,
+            FAQ and final review can be added now.
+          </p>
+          <button
+            type="button"
+            onClick={() => void runEnrichment()}
+            className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-amber-600"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Retry
+          </button>
+        </div>
+      )}
+
       {/* Sticky in-guide nav bar — the guide's own navigation: back to
           Your Study Guides, the title, jump links to this guide's real
           sections (only the ones it has), and reading progress. It sticks
@@ -954,7 +1040,7 @@ export default function GuideView({
       {/* Mastery summary + study plan, from this user's real answers and
           the test date they gave. */}
       <div className="mt-6 space-y-4">
-        <MasterySummary records={guideErrors.records} />
+        <MasterySummary records={guideErrors.records} totalConcepts={modules.reduce((n, m) => n + m.concepts.length, 0)} />
         <StudyPlan
           testTiming={meta?.testTiming}
           modules={modules}
