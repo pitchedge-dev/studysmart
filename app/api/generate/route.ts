@@ -6,15 +6,18 @@ import {
   isOverloadedError,
   isRetryableProviderError,
   MISSING_KEY_MESSAGE,
+  modelLabel,
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
 import {
   attemptTimeoutMs,
+  GENERATE_FIRST_ATTEMPT_MS,
   GENERATE_FULL_ATTEMPT_MS,
   GENERATE_REPAIR_AFTER_MS,
   GENERATE_REPAIR_ATTEMPT_MS,
   GENERATE_SIMPLE_ATTEMPT_MS,
   GENERATE_WALL_CLOCK_MS,
+  MIN_REMAINING_MS,
   remainingMs,
 } from "@/lib/generationBudget";
 
@@ -266,7 +269,7 @@ export async function POST(req: NextRequest) {
     //
     // Walk the model fallback chain. Each model is tried at most once
     // per shape — retrying the same overloaded model just burns its
-    // free quota. The whole core pass stays inside a 40s wall clock
+    // free quota. The whole core pass stays inside a 50s wall clock
     // (see lib/generationBudget.ts): every attempt's abort is cut
     // down to the wall clock REMAINING when the attempt starts, so
     // an attempt can never run past the budget — the old code's
@@ -288,8 +291,21 @@ export async function POST(req: NextRequest) {
       // of the chain — including the no-key safety net — was never
       // tried (2026-11-25: generation failed while untried providers
       // remained). The only early exit now is the wall clock.
-      for (const model of models) {
-        if (remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000) break;
+      //
+      // Two-tier caps (see lib/generationBudget.ts): the FIRST model
+      // gets the long cap so a healthy full guide can finish exactly
+      // as today; every later model gets the short cap, so one hanging
+      // provider cannot eat the wall. 2026-11-26 02:37: a 25s cap on
+      // every model let two slow Gemini tries eat 36s of a 40s wall
+      // and the loop broke with 4s left (the old 5s threshold), so
+      // Moonshot, AIML, SambaNova, Cohere, DeepSeek and Pollinations
+      // were never tried. The loop now breaks only under 2s remaining.
+      for (let i = 0; i < models.length; i++) {
+        const model = models[i];
+        if (remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < MIN_REMAINING_MS)
+          break;
+        const fullCapMs =
+          i === 0 ? GENERATE_FIRST_ATTEMPT_MS : GENERATE_FULL_ATTEMPT_MS;
         try {
           const { object } = await generateObject({
             model,
@@ -302,16 +318,22 @@ export async function POST(req: NextRequest) {
               attemptTimeoutMs(
                 startedAt,
                 GENERATE_WALL_CLOCK_MS,
-                GENERATE_FULL_ATTEMPT_MS
+                fullCapMs
               )
             ),
           });
           return { core: object, modelUsed: model, lastErr };
         } catch (fullErr) {
           lastErr = fullErr;
-          logError("[/api/generate] full-shape attempt failed:", fullErr);
+          logError(
+            `[/api/generate] full-shape attempt failed (${modelLabel(model)}):`,
+            fullErr
+          );
           if (isRetryableProviderError(fullErr)) continue;
-          if (remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000) break;
+          if (
+            remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < MIN_REMAINING_MS
+          )
+            break;
           try {
             const { object } = await generateObject({
               model,
@@ -342,7 +364,7 @@ export async function POST(req: NextRequest) {
           } catch (simpleErr) {
             lastErr = simpleErr;
             logError(
-              "[/api/generate] simplified-shape attempt failed:",
+              `[/api/generate] simplified-shape attempt failed (${modelLabel(model)}):`,
               simpleErr
             );
             continue;
@@ -434,7 +456,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (repairErr) {
         logError(
-          "[/api/generate] repair attempt failed, keeping original:",
+          `[/api/generate] repair attempt failed (${modelLabel(modelUsed)}), keeping original:`,
           repairErr
         );
       }

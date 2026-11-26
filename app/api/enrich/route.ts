@@ -5,6 +5,7 @@ import {
   getLiteModels,
   isOverloadedError,
   MISSING_KEY_MESSAGE,
+  modelLabel,
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
 import { EnrichmentSchema, GenerateResultSchema } from "@/lib/guideSchema";
@@ -13,6 +14,7 @@ import {
   attemptTimeoutMs,
   ENRICH_ATTEMPT_MS,
   ENRICH_WALL_CLOCK_MS,
+  MIN_REMAINING_MS,
   remainingMs,
 } from "@/lib/generationBudget";
 
@@ -84,7 +86,8 @@ export async function POST(req: NextRequest) {
     const startedAt = Date.now();
     let lastErr: unknown = null;
     for (const liteModel of liteModels) {
-      if (remainingMs(startedAt, ENRICH_WALL_CLOCK_MS) < 5000) break;
+      if (remainingMs(startedAt, ENRICH_WALL_CLOCK_MS) < MIN_REMAINING_MS)
+        break;
       try {
         const { object } = await generateObject({
           model: liteModel,
@@ -121,7 +124,10 @@ export async function POST(req: NextRequest) {
         });
       } catch (enrichErr) {
         lastErr = enrichErr;
-        logError("[/api/enrich] attempt failed:", enrichErr);
+        logError(
+          `[/api/enrich] attempt failed (${modelLabel(liteModel)}):`,
+          enrichErr
+        );
         continue;
       }
     }

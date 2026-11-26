@@ -30,6 +30,7 @@ export {
   isOverloadedError,
   isRetryableProviderError,
   MISSING_KEY_MESSAGE,
+  modelLabel,
   OVERLOADED_MESSAGE,
   safeErrorDetail,
 } from "./providers";

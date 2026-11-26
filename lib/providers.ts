@@ -980,6 +980,17 @@ function buildProviders(): ProviderInstances {
   };
 }
 
+// Spec key ("moonshot/kimi-k2-0711-preview") for each model built by
+// resolveSpecs(), keyed by the model object itself — so modelLabel()
+// can name the provider exactly. The SDK's own provider/modelId is
+// NOT enough: every OpenAI-compatible provider reports provider
+// "openai.chat", so SambaNova and Cerebras both come out as
+// "openai.chat/gpt-oss-120b" and NVIDIA and Novita both as
+// "openai.chat/openai/gpt-oss-120b". A WeakMap keeps the mapping
+// without mutating the SDK's model objects, and entries die with
+// the model objects (models are rebuilt per request).
+const MODEL_SPEC_KEYS = new WeakMap<LanguageModel, string>();
+
 function resolveSpecs(
   specs: readonly ModelSpec[],
   providers: ProviderInstances
@@ -991,7 +1002,9 @@ function resolveSpecs(
     // Each provider is callable with a model ID, but their call
     // signatures differ (model-ID string unions), so call through a
     // common (modelId: string) => LanguageModel type.
-    out.push((provider as (modelId: string) => LanguageModel)(id));
+    const model = (provider as (modelId: string) => LanguageModel)(id);
+    MODEL_SPEC_KEYS.set(model, `${kind}/${id}`);
+    out.push(model);
   }
   return out;
 }
@@ -1060,6 +1073,34 @@ export function getLiteModels(): LanguageModel[] {
  *  Same as getModelsFor("reasoning"). */
 export function getVisionModels(): LanguageModel[] {
   return getModelsFor("reasoning");
+}
+
+/**
+ * Human-readable "provider/model-id" label for a model, for server
+ * logs — e.g. "google/gemini-3.8-flash", "moonshot/kimi-k2-0711-preview".
+ * Prefers the chain spec key recorded when the model was built (see
+ * MODEL_SPEC_KEYS): the SDK's own provider/modelId is ambiguous for
+ * the OpenAI-compatible providers, so the spec key is what makes the
+ * label exact. Falls back to the SDK's provider/modelId for models
+ * built outside the chain. Server logs are the only diagnostic we
+ * have (Hobby retention is 1 hour), so every attempt-failure log line
+ * must carry this label: without it, a failure has to be matched to
+ * its model by call order, which is how the 2026-11-26 02:37 outage
+ * had to be diagnosed. Never includes a key — these are public model
+ * identifiers only.
+ */
+export function modelLabel(model: LanguageModel): string {
+  const specKey = MODEL_SPEC_KEYS.get(model);
+  if (specKey) return specKey;
+  const provider =
+    typeof model.provider === "string" && model.provider
+      ? model.provider
+      : "unknown-provider";
+  const modelId =
+    typeof model.modelId === "string" && model.modelId
+      ? model.modelId
+      : "unknown-model";
+  return `${provider}/${modelId}`;
 }
 
 // ---------------------------------------------------------------------------
