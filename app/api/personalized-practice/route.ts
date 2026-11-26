@@ -7,7 +7,6 @@ import {
   isOverloadedError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
-  safeErrorDetail,
 } from "@/lib/gemini";
 
 export const maxDuration = 60;
@@ -196,7 +195,7 @@ export async function POST(req: NextRequest) {
 
     if (isOverloadedError(lastErr)) {
       return NextResponse.json(
-        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { error: OVERLOADED_MESSAGE },
         { status: 503 }
       );
     }
@@ -206,7 +205,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error: "Failed to generate personalized practice. Please try again.",
-        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );

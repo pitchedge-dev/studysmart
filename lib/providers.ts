@@ -5,7 +5,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 
 /**
- * Cross-provider AI routing, PER CATEGORY — 19 providers, mixed and
+ * Cross-provider AI routing, PER CATEGORY — 18 providers, mixed and
  * matched per job (docs/mix-match-2026-11-25.md).
  *
  * History: everything used to go through Google Gemini only, and the
@@ -13,15 +13,15 @@ import type { LanguageModel } from "ai";
  * which blocked the whole site. First we added one global fallback list
  * (Gemini → Groq → OpenRouter). Then each category routed to the provider
  * best for that job first, with the other two free providers as backups.
- * Then 12 free providers per category. Now 19: the Nov 2026 API hunt
+ * Then 12 free providers per category. Now 18: the Nov 2026 API hunt
  * (docs/api-hunt-2026-11-25.md) tested ~50 candidates and added
  * Pollinations (no key at all — verified live) and GitHub Models
  * (gated on GITHUB_TOKEN, NOT yet live-verified: the POST test was
  * blocked by an approval timeout, so it sits LAST and only activates
  * once a key is set); the mix-and-match pass (2026-11-25) wired the
- * seven remaining free signups from that hunt — SiliconFlow, AIML API,
- * Hugging Face, Moonshot, Zhipu, Qwen/DashScope, Vercel AI Gateway —
- * and reordered every category so each job leads with the provider
+ * six remaining free signups from that hunt — SiliconFlow, AIML API,
+ * Hugging Face, Moonshot, Zhipu, Qwen/DashScope — and reordered every
+ * category so each job leads with the provider
  * best suited to it (strongest reasoning for guides, fastest for chat
  * and lite templates, strictest JSON for practice/games, vision-only
  * for check-reasoning), instead of one shared fallback order.
@@ -31,7 +31,7 @@ import type { LanguageModel } from "ai";
  * environment variables. Never hardcode, log, or commit a key value.
  * See .env.example for the names.
  *
- * The 19 providers (all free to start, no card — limits as published
+ * The 18 providers (all free to start, no card — limits as published
  * Nov 2026, re-check the consoles before relying on exact numbers):
  *  1. Google Gemini — AI Studio free tier (~20 req/day Flash).
  *  2. Groq — free, no card: 30 RPM, 1,000 req/day per model.
@@ -93,9 +93,11 @@ import type { LanguageModel } from "ai";
  * 18. Qwen / Alibaba DashScope — free credits on signup, no card.
  *     OpenAI-compatible (dashscope-intl.aliyuncs.com/compatible-mode/
  *     v1). Qwen-Plus / Qwen3-8B for text, Qwen2.5-VL 72B for vision.
- * 19. Vercel AI Gateway — free credits, no card. OpenAI-compatible
- *     (ai-gateway.vercel.sh/v1). One key, many models; gpt-4o-mini
- *     for text and vision (cheap, reliable).
+ * 19. REMOVED 2026-11-26 — Vercel AI Gateway: its free credits
+ *     required a credit card on file, which this app never adds; its
+ *     account was suspended for insufficient balance and took live
+ *     generation down with it (2026-11-25). Do not re-add it without
+ *     a card-free way to use it.
  *
  * REJECTED (do not add): Mistral (phone verification required),
  * Together AI (no free tier, $15 min purchase), Fireworks AI (no free
@@ -386,23 +388,18 @@ export const DASHSCOPE_TEXT_MODELS = ["qwen-plus", "qwen3-8b"] as const;
 /** DashScope vision model for /api/check-reasoning. */
 export const DASHSCOPE_VISION_MODEL = "qwen2.5-vl-72b-instruct";
 
-// ---------------------------------------------------------------------------
-// Vercel AI Gateway (free credits, no card — OpenAI-compatible,
-// ai-gateway.vercel.sh/v1). One key, many models behind it. gpt-4o-mini
-// is the cheap, reliable default for text and (multimodal) vision.
-// ---------------------------------------------------------------------------
-
-export const AI_GATEWAY_TEXT_MODEL = "openai/gpt-4o-mini";
-
-/** AI Gateway vision model for /api/check-reasoning (gpt-4o-mini is multimodal). */
-export const AI_GATEWAY_VISION_MODEL = "openai/gpt-4o-mini";
+// NOTE (2026-11-26): Vercel AI Gateway was removed from every chain.
+// It needs a credit card on file to unlock its free credits — which this
+// app will never add — and its account was suspended for insufficient
+// balance, which took live generation down with it (2026-11-25). A
+// provider that can only work with a card on file must never be wired in.
 
 // ---------------------------------------------------------------------------
 // Per-category routing — MIXED AND MATCHED per job (2026-11-25,
 // docs/mix-match-2026-11-25.md). Each category lists its models grouped
 // by provider: the PRIMARY provider first (best for that job), then
-// backups in priority order — 19 providers per text category (primary +
-// up to 18 backups). The same provider appears in several categories,
+// backups in priority order — 18 providers per text category (primary +
+// up to 17 backups). The same provider appears in several categories,
 // but the ORDER differs per job: strongest reasoning leads guides,
 // fastest/cheapest leads chat and the lite steps, strictest JSON leads
 // practice/games, vision-only models (ordered by vision quality) make
@@ -433,7 +430,6 @@ type ProviderKind =
   | "moonshot"
   | "zhipu"
   | "dashscope"
-  | "aigateway";
 type ModelSpec = readonly [ProviderKind, string];
 
 export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
@@ -444,8 +440,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // 3 Ultra (10,000/day), OpenRouter Nemotron 3 Ultra (JSON 6/6),
     // Moonshot Kimi K2 (256K context), Zhipu GLM-4.5, Qwen-Plus — then
     // Groq 120b (strict json_schema, 500 tok/s, 1,000/day), SiliconFlow
-    // DeepSeek V3.2, AIML Llama 3.3 70B, HF Qwen 2.5 72B, AI Gateway
-    // gpt-4o-mini, SambaNova, Cohere, Cloudflare, Cerebras (last among
+    // DeepSeek V3.2, AIML Llama 3.3 70B, HF Qwen 2.5 72B, SambaNova,
+    // Cohere, Cloudflare, Cerebras (last among
     // ongoing — 8K context cap), DeepSeek, Novita, Pollinations (no key),
     // GitHub Models (unverified, last).
     guides: [
@@ -464,7 +460,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
       ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["sambanova", "gpt-oss-120b"],
       ["cohere", "command-a-03-2025"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
@@ -480,7 +475,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // SiliconFlow Qwen3-8B, DashScope Qwen3-8B — then Cerebras (fastest
     // of the earlier providers, 1M tokens/day), Cloudflare (300 RPM),
     // OpenRouter Super VL, NVIDIA, Moonshot v1-8k, SambaNova, Cohere,
-    // AIML, HF, AI Gateway, DeepSeek, Novita.
+    // AIML, HF, DeepSeek, Novita.
     chat: [
       ["groq", "openai/gpt-oss-20b"],
       ["groq", "openai/gpt-oss-120b"],
@@ -501,7 +496,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cohere", "command-a-03-2025"],
       ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
       ["pollinations", "openai"],
@@ -513,7 +507,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // Then Gemini Lite, Groq 120b (strict JSON), OpenRouter Super VL
     // (JSON 7/7), then the fast small models (Zhipu Air, SiliconFlow
     // Qwen3-8B, Cerebras), NVIDIA, Moonshot K2, DashScope, SambaNova,
-    // Cohere, Cloudflare, AIML, HF, AI Gateway, DeepSeek, Novita.
+    // Cohere, Cloudflare, AIML, HF, DeepSeek, Novita.
     games: [
       ["groq", "openai/gpt-oss-20b"],
       ["groq", "openai/gpt-oss-120b"],
@@ -533,7 +527,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
       ["pollinations", "openai"],
@@ -544,8 +537,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // 3.8: proven structured output here. Then Groq 120b (STRICT
     // json_schema guarantees), OpenRouter Super VL (JSON 7/7), NVIDIA
     // Nemotron 3 Ultra, Moonshot Kimi K2, Zhipu GLM-4.5, DashScope
-    // Qwen-Plus, SiliconFlow DeepSeek V3.2, AIML, HF, AI Gateway,
-    // SambaNova, Cohere, Cloudflare, Cerebras, DeepSeek, Novita.
+    // Qwen-Plus, SiliconFlow DeepSeek V3.2, AIML, HF, SambaNova,
+    // Cohere, Cloudflare, Cerebras, DeepSeek, Novita.
     practice: [
       ["google", "gemini-3.8-flash"],
       ["google", "gemini-3.6-flash"],
@@ -560,7 +553,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
       ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["sambanova", "gpt-oss-120b"],
       ["cohere", "command-a-03-2025"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
@@ -577,8 +569,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // it is shown, so a hallucinated ID from a cheap model just costs
     // one retry, never a fake video. Then Groq 120b, OpenRouter Nemotron
     // 3 Ultra, NVIDIA Nemotron 3 Ultra, Moonshot K2, Zhipu GLM-4.5,
-    // DashScope Qwen-Plus, SiliconFlow, AIML, HF, AI Gateway, SambaNova,
-    // Cohere, Cerebras (Qwen 3 235B), DeepSeek, Novita.
+    // DashScope Qwen-Plus, SiliconFlow, AIML, HF, SambaNova, Cohere,
+    // Cerebras (Qwen 3 235B), DeepSeek, Novita.
     videos: [
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["google", "gemini-3.8-flash"],
@@ -594,7 +586,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
       ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["sambanova", "gpt-oss-120b"],
       ["cohere", "command-a-03-2025"],
       ["cerebras", "qwen-3-235b-a22b-instruct-2507"],
@@ -607,7 +598,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // Text-only models are NOT in this list — sending them an image would
     // just error. Ordered by vision quality: Gemini (proven here), then
     // OpenRouter Nemotron 3.5 Super VL (20/20 passed), NVIDIA Nemotron
-    // 3.5 Super VL + Llama 3.2 90B Vision, AIML / AI Gateway gpt-4o-mini,
+    // 3.5 Super VL + Llama 3.2 90B Vision, AIML gpt-4o-mini,
     // DashScope + SiliconFlow Qwen2.5-VL 72B, Zhipu GLM-4.5V, Moonshot
     // v1-8k-vision, Groq qwen3.8-27b (multimodal + JSON mode, 450 tok/s),
     // HF Llama 3.2 11B Vision, Cerebras Gemma 4 31B, SambaNova Gemma 4
@@ -622,7 +613,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b"],
       ["nvidia", "meta/llama-3.2-90b-vision-instruct"],
       ["aiml", "gpt-4o-mini"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["dashscope", "qwen2.5-vl-72b-instruct"],
       ["siliconflow", "Qwen/Qwen2.5-VL-72B-Instruct"],
       ["zhipu", "glm-4.5v"],
@@ -655,7 +645,6 @@ export const CATEGORY_ROUTING: Record<
       "SiliconFlow (DeepSeek V3.2)",
       "AIML API (Llama 3.3 70B)",
       "Hugging Face (Qwen 2.5 72B)",
-      "Vercel AI Gateway (gpt-4o-mini)",
       "SambaNova (gpt-oss-120b)",
       "Cohere (Command A)",
       "Cloudflare (gpt-oss-120b)",
@@ -682,7 +671,6 @@ export const CATEGORY_ROUTING: Record<
       "Cohere (Command A)",
       "AIML API (Llama 3.3 70B)",
       "Hugging Face (Llama 3.1 8B)",
-      "Vercel AI Gateway (gpt-4o-mini)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
       "Pollinations (openai, no key — safety net)",
@@ -705,7 +693,6 @@ export const CATEGORY_ROUTING: Record<
       "Cloudflare (gpt-oss-120b)",
       "AIML API (Llama 3.3 70B)",
       "Hugging Face (Llama 3.1 8B)",
-      "Vercel AI Gateway (gpt-4o-mini)",
       "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
       "Pollinations (openai, no key — safety net)",
@@ -724,7 +711,6 @@ export const CATEGORY_ROUTING: Record<
       "SiliconFlow (DeepSeek V3.2)",
       "AIML API (Llama 3.3 70B)",
       "Hugging Face (Qwen 2.5 72B)",
-      "Vercel AI Gateway (gpt-4o-mini)",
       "SambaNova (gpt-oss-120b)",
       "Cohere (Command A)",
       "Cloudflare (gpt-oss-120b)",
@@ -748,7 +734,6 @@ export const CATEGORY_ROUTING: Record<
       "SiliconFlow (DeepSeek V3.2)",
       "AIML API (Llama 3.3 70B)",
       "Hugging Face (Qwen 2.5 72B)",
-      "Vercel AI Gateway (gpt-4o-mini)",
       "SambaNova (gpt-oss-120b)",
       "Cohere (Command A)",
       "Cerebras (Qwen 3 235B)",
@@ -764,7 +749,6 @@ export const CATEGORY_ROUTING: Record<
       "OpenRouter (Nemotron 3.5 Super VL, vision)",
       "NVIDIA NIM (Nemotron 3.5 Super VL / Llama 3.2 90B Vision)",
       "AIML API (gpt-4o-mini, vision)",
-      "Vercel AI Gateway (gpt-4o-mini, vision)",
       "DashScope (Qwen2.5-VL 72B, vision)",
       "SiliconFlow (Qwen2.5-VL 72B, vision)",
       "Zhipu (GLM-4.5V, vision)",
@@ -851,9 +835,12 @@ function createCloudflareProvider() {
 function createDeepSeekProvider() {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) return null;
+  // The /v1 is required: the SDK appends /chat/completions to this base
+  // URL. Without it every DeepSeek call 404d — DeepSeek never worked
+  // in this app until this fix (2026-11-26).
   return createOpenAI({
     apiKey,
-    baseURL: "https://api.deepseek.com",
+    baseURL: "https://api.deepseek.com/v1",
   });
 }
 
@@ -949,15 +936,6 @@ function createDashScopeProvider() {
   });
 }
 
-function createAiGatewayProvider() {
-  const apiKey = process.env.AI_GATEWAY_API_KEY;
-  if (!apiKey) return null;
-  return createOpenAI({
-    apiKey,
-    baseURL: "https://ai-gateway.vercel.sh/v1",
-  });
-}
-
 type ProviderInstances = {
   google: ReturnType<typeof createGoogle>;
   groq: ReturnType<typeof createGroqProvider>;
@@ -977,7 +955,6 @@ type ProviderInstances = {
   moonshot: ReturnType<typeof createMoonshotProvider>;
   zhipu: ReturnType<typeof createZhipuProvider>;
   dashscope: ReturnType<typeof createDashScopeProvider>;
-  aigateway: ReturnType<typeof createAiGatewayProvider>;
 };
 
 function buildProviders(): ProviderInstances {
@@ -1000,7 +977,6 @@ function buildProviders(): ProviderInstances {
     moonshot: createMoonshotProvider(),
     zhipu: createZhipuProvider(),
     dashscope: createDashScopeProvider(),
-    aigateway: createAiGatewayProvider(),
   };
 }
 
@@ -1048,8 +1024,8 @@ export function getModels(): LanguageModel[] {
  *  (guide enrichment). Cheap and fast first: Groq 20b leads on raw
  *  speed, then the Gemini Lite models, then the cheapest allowances —
  *  Cloudflare (300 RPM), Zhipu GLM-4.5-Air, SiliconFlow Qwen3-8B,
- *  DashScope Qwen3-8B — then Cerebras, AIML, HF, Moonshot v1-8k, AI
- *  Gateway, OpenRouter's most reliable free model + router, NVIDIA,
+ *  DashScope Qwen3-8B — then Cerebras, AIML, HF, Moonshot v1-8k,
+ *  OpenRouter's most reliable free model + router, NVIDIA,
  *  SambaNova, Cohere, DeepSeek, Novita, Pollinations (no key), GitHub
  *  Models (unverified, last). */
 export function getLiteModels(): LanguageModel[] {
@@ -1066,7 +1042,6 @@ export function getLiteModels(): LanguageModel[] {
       ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
       ["moonshot", "moonshot-v1-8k"],
-      ["aigateway", "openai/gpt-4o-mini"],
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["openrouter", "openrouter/free"],
       ["nvidia", "openai/gpt-oss-120b"],
@@ -1103,7 +1078,9 @@ function errorText(err: unknown): string {
 
 /** True when an error means the providers are overloaded / rate-limited /
  *  out of free quota — the cases where the user-facing message should say
- *  all providers are exhausted. Used only for the final 503 response. */
+ *  all providers are exhausted. Billing exhaustion (402, suspended
+ *  account, card required) counts too: the chain is out of free calls
+ *  either way. Used only for the final 503 response. */
 export function isOverloadedError(err: unknown): boolean {
   const text = errorText(err);
   return (
@@ -1117,6 +1094,14 @@ export function isOverloadedError(err: unknown): boolean {
     text.includes("high demand") ||
     text.includes("too many requests") ||
     text.includes("unavailable") ||
+    text.includes("402") ||
+    text.includes("insufficient balance") ||
+    text.includes("suspend") ||
+    text.includes("credit card") ||
+    text.includes("billing") ||
+    text.includes("payment") ||
+    text.includes("out of credits") ||
+    text.includes("free credits") ||
     text.includes("abort") ||
     text.includes("timed out") ||
     text.includes("timeout")
@@ -1135,7 +1120,12 @@ export function isOverloadedError(err: unknown): boolean {
  *  With 10 providers in the chain, this is deliberately wide: a 400 /
  *  "unsupported response_format" from one OpenAI-compatible provider
  *  (it does not support json_schema structured output) must NOT stop
- *  the chain — the same request works on the next provider. */
+ *  the chain — the same request works on the next provider. Billing
+ *  errors (402, insufficient balance, suspended account, credit-card
+ *  demands) are provider-side too: they must never stop the chain and
+ *  must never reach the student as the failure message (2026-11-25:
+ *  an AI Gateway billing error surfaced as the generation failure
+ *  because these patterns were missing). */
 export function isRetryableProviderError(err: unknown): boolean {
   if (isOverloadedError(err)) return true;
   const text = errorText(err);
@@ -1150,6 +1140,17 @@ export function isRetryableProviderError(err: unknown): boolean {
     text.includes("invalid_api_key") ||
     text.includes("authentication") ||
     text.includes("payment required") ||
+    text.includes("payment") ||
+    text.includes("insufficient balance") ||
+    text.includes("insufficient_balance") ||
+    text.includes("suspend") ||
+    text.includes("credit card") ||
+    text.includes("add a card") ||
+    text.includes("recharge") ||
+    text.includes("billing") ||
+    text.includes("out of credits") ||
+    text.includes("credits exhausted") ||
+    text.includes("free credits") ||
     text.includes("not_found") ||
     text.includes("model_not_found") ||
     text.includes("model not found") ||
@@ -1163,7 +1164,7 @@ export function isRetryableProviderError(err: unknown): boolean {
 }
 
 export const MISSING_KEY_MESSAGE =
-  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face, Moonshot, Zhipu, Qwen/DashScope, Vercel AI Gateway, or a GitHub token) to the environment to generate content — Pollinations (no key) is always tried last.";
+  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face, Moonshot, Zhipu, Qwen/DashScope, or a GitHub token) to the environment to generate content — Pollinations (no key) is always tried last.";
 
 export const OVERLOADED_MESSAGE =
   "All AI providers are busy / out of free calls right now — try again later";

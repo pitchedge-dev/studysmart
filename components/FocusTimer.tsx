@@ -220,8 +220,11 @@ export default function FocusTimer({
                 : "Break over — back to focus."}
           </p>
           <p className="mt-0.5 text-xs font-medium text-ink-400">
-            {MODE_LABEL[mode]} · round {rounds % 4 === 0 ? 4 : rounds % 4} of
-            4 before a long break
+            {/* rounds counts COMPLETED sessions, so the session in
+                progress (or about to start) is completed+1 within the
+                4-cycle — a fresh account shows round 1, not 4. */}
+            {MODE_LABEL[mode]} · round {(rounds % 4) + 1} of 4 before a long
+            break
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             {running ? (

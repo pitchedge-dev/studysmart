@@ -6,7 +6,6 @@ import {
   isOverloadedError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
-  safeErrorDetail,
 } from "@/lib/gemini";
 import { EnrichmentSchema, GenerateResultSchema } from "@/lib/guideSchema";
 import { sanitizeGuide } from "@/lib/guideQuality";
@@ -129,24 +128,18 @@ export async function POST(req: NextRequest) {
 
     if (isOverloadedError(lastErr)) {
       return NextResponse.json(
-        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { error: OVERLOADED_MESSAGE },
         { status: 503 }
       );
     }
     return NextResponse.json(
-      {
-        error: "Could not generate the finishing sections. Please try again.",
-        detail: safeErrorDetail(lastErr),
-      },
+      { error: "Could not generate the finishing sections. Please try again." },
       { status: 500 }
     );
   } catch (err) {
     logError("[/api/enrich] error:", err);
     return NextResponse.json(
-      {
-        error: "Could not generate the finishing sections. Please try again.",
-        detail: safeErrorDetail(err),
-      },
+      { error: "Could not generate the finishing sections. Please try again." },
       { status: 500 }
     );
   }

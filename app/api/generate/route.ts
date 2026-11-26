@@ -7,7 +7,6 @@ import {
   isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
-  safeErrorDetail,
 } from "@/lib/gemini";
 import {
   attemptTimeoutMs,
@@ -282,15 +281,16 @@ export async function POST(req: NextRequest) {
       lastErr: unknown;
     }> => {
       let lastErr: unknown = null;
-      let attempts = 0;
+      // One pass per model in the chain: the for loop itself bounds the
+      // walk to one attempt per model. An earlier version counted
+      // attempts (full + simplified calls) against models.length, so a
+      // few non-retryable failures burned the whole budget and the tail
+      // of the chain — including the no-key safety net — was never
+      // tried (2026-11-25: generation failed while untried providers
+      // remained). The only early exit now is the wall clock.
       for (const model of models) {
-        if (
-          attempts >= models.length ||
-          remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000
-        )
-          break;
+        if (remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000) break;
         try {
-          attempts += 1;
           const { object } = await generateObject({
             model,
             schema: GenerateResultSchema,
@@ -311,13 +311,8 @@ export async function POST(req: NextRequest) {
           lastErr = fullErr;
           logError("[/api/generate] full-shape attempt failed:", fullErr);
           if (isRetryableProviderError(fullErr)) continue;
-          if (
-            attempts >= models.length ||
-            remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000
-          )
-            break;
+          if (remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000) break;
           try {
-            attempts += 1;
             const { object } = await generateObject({
               model,
               schema: SimpleGenerateResultSchema,
@@ -364,14 +359,20 @@ export async function POST(req: NextRequest) {
     let core = coreResult ? sanitizeGuide(coreResult) : null;
 
     if (!core) {
-      // Every model in the chain failed.
+      // Every model in the chain failed. The student gets one plain
+      // message — never a single provider's raw error (2026-11-25: an
+      // AI Gateway billing demand reached the student this way). The
+      // real error is already in the server logs via logError.
       if (isOverloadedError(lastErr)) {
         return NextResponse.json(
-          { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+          { error: OVERLOADED_MESSAGE },
           { status: 503 }
         );
       }
-      throw lastErr;
+      return NextResponse.json(
+        { error: "Failed to generate study material. Please try again." },
+        { status: 500 }
+      );
     }
 
     // Cheap self-check: a guide that came back missing required parts
@@ -478,10 +479,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     logError("[/api/generate] error:", err);
     return NextResponse.json(
-      {
-        error: "Failed to generate study material. Please try again.",
-        detail: safeErrorDetail(err),
-      },
+      { error: "Failed to generate study material. Please try again." },
       { status: 500 }
     );
   }

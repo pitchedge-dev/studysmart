@@ -7,7 +7,6 @@ import {
   isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
-  safeErrorDetail,
 } from "@/lib/gemini";
 
 export const maxDuration = 60;
@@ -163,7 +162,7 @@ List pros (what was done well: correct steps, good method, clear working) and co
 
     if (isOverloadedError(lastErr)) {
       return NextResponse.json(
-        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { error: OVERLOADED_MESSAGE },
         { status: 503 }
       );
     }
@@ -173,7 +172,6 @@ List pros (what was done well: correct steps, good method, clear working) and co
     return NextResponse.json(
       {
         error: "The reasoning could not be checked. Please try again.",
-        detail: safeErrorDetail(err),
       },
       { status: 500 }
     );

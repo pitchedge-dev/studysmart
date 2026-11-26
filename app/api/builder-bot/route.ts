@@ -12,7 +12,6 @@ import {
   isRetryableProviderError,
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
-  safeErrorDetail,
 } from "@/lib/gemini";
 
 // Vercel Hobby functions are killed after a short default timeout; allow the
@@ -180,7 +179,7 @@ Return the summary, the change list, and the complete updated guide.`;
 
     if (isOverloadedError(lastErr)) {
       return NextResponse.json(
-        { error: OVERLOADED_MESSAGE, detail: safeErrorDetail(lastErr) },
+        { error: OVERLOADED_MESSAGE },
         { status: 503 }
       );
     }
@@ -188,7 +187,7 @@ Return the summary, the change list, and the complete updated guide.`;
   } catch (err) {
     console.error("[/api/builder-bot] error:", err);
     return NextResponse.json(
-      { error: "Builder Bot could not make that change. Please try again.", detail: safeErrorDetail(err) },
+      { error: "Builder Bot could not make that change. Please try again." },
       { status: 500 }
     );
   }
