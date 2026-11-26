@@ -101,6 +101,7 @@ import {
   getSupabase,
   listFriendships,
   saveGuideToAccount,
+  updateGuideContent,
   type AppUser,
   type Profile,
 } from "@/lib/supabase";
@@ -382,6 +383,10 @@ export default function Home() {
   // `g` then a letter jumps to a section (Linear-style, reliable only
   // because every target is a real section). Never fires while typing.
   const gPendingRef = useRef(false);
+  // Generation counter: each call to generate() bumps it, so a
+  // background /api/enrich result can tell whether the student has
+  // already generated a newer guide (and drop its own result then).
+  const enrichmentTokenRef = useRef(0);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -793,6 +798,63 @@ export default function Home() {
     .filter(Boolean)
     .join("\n\n");
 
+  /**
+   * Finishing sections (objectives, cheat sheet, applications, FAQ,
+   * final review) arrive via /api/enrich AFTER the core guide lands —
+   * see app/api/enrich/route.ts. This runs in the background: the
+   * guide is already usable, and a slow or failed enrichment never
+   * fails the generation. When the sections arrive they are merged
+   * into the guide on screen — but only when that guide is still the
+   * one showing (the merge checks object identity, so opening another
+   * guide meanwhile never gets the wrong sections) — and, when the
+   * guide was saved, into the saved row too, merged into the CURRENT
+   * saved content so a Builder Bot edit made meanwhile is never
+   * clobbered. The generation token drops the result when the student
+   * has already generated a newer guide.
+   */
+  async function enrichGuideInBackground(args: {
+    notes: string;
+    images: string[];
+    generated: GenerateResult;
+    savedId: string | null;
+    generation: number;
+  }) {
+    try {
+      const res = await fetch("/api/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: args.notes, images: args.images }),
+      });
+      if (!res.ok) return;
+      const enrichment = (await res.json()) as Partial<GenerateResult>;
+      if (enrichmentTokenRef.current !== args.generation) return;
+      const fields = {
+        objectives: enrichment.objectives ?? [],
+        cheatSheet: enrichment.cheatSheet,
+        realWorldApplications: enrichment.realWorldApplications ?? [],
+        faq: enrichment.faq ?? [],
+        finalReview: enrichment.finalReview,
+      };
+      setResult((prev) =>
+        prev === args.generated ? { ...prev, ...fields } : prev
+      );
+      if (args.savedId && user) {
+        const current = await getGuideById(args.savedId);
+        if (!current) return;
+        const base = current.guide as unknown as GenerateResult;
+        const merged = { ...base, ...fields };
+        await updateGuideContent({
+          id: args.savedId,
+          userId: user.id,
+          guide: merged as unknown as Record<string, unknown>,
+          quiz: merged.quiz,
+        });
+      }
+    } catch {
+      // Best effort — the core guide already stands on its own.
+    }
+  }
+
   async function generate() {
     const notes = combinedNotes;
     if ((!notes && images.length === 0) || loading) return;
@@ -834,6 +896,7 @@ export default function Home() {
       // Signed in? Save the guide to the account automatically.
       // Either way, the guide copy gets its error-tracking key: the saved
       // row id when it was saved, a content hash otherwise.
+      let savedId: string | null = null;
       if (user) {
         const saved = await saveGuideToAccount({
           user,
@@ -848,6 +911,7 @@ export default function Home() {
         // The saved row id powers the "Edit with Builder Bot" banner
         // shown right under a fresh guide.
         setSavedGuideId(saved?.id ?? null);
+        savedId = saved?.id ?? null;
         setSaveNote(
           saved
             ? "Saved to Your Study Guides."
@@ -877,6 +941,20 @@ export default function Home() {
           guideKey
         );
       }
+      // Finishing sections (objectives, cheat sheet, FAQ, final
+      // review) now arrive in the background via /api/enrich — the
+      // core guide above is already showing and saved, so a slow
+      // finishing pass can no longer push the generation past the
+      // 60s timeout. Fire-and-forget: enrichGuideInBackground
+      // merges the sections in when they arrive and never throws.
+      const generation = ++enrichmentTokenRef.current;
+      void enrichGuideInBackground({
+        notes,
+        images,
+        generated,
+        savedId,
+        generation,
+      });
       setAnswers({});
       setPracticeProgress({ answered: 0, correct: 0 });
       setCheckpointByModule({});

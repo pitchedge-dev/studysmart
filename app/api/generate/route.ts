@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
 import {
-  getLiteModels,
   getModelsFor,
   isOverloadedError,
   isRetryableProviderError,
@@ -10,6 +9,15 @@ import {
   OVERLOADED_MESSAGE,
   safeErrorDetail,
 } from "@/lib/gemini";
+import {
+  attemptTimeoutMs,
+  GENERATE_FULL_ATTEMPT_MS,
+  GENERATE_REPAIR_AFTER_MS,
+  GENERATE_REPAIR_ATTEMPT_MS,
+  GENERATE_SIMPLE_ATTEMPT_MS,
+  GENERATE_WALL_CLOCK_MS,
+  remainingMs,
+} from "@/lib/generationBudget";
 
 // Vercel Hobby functions are killed after a short default timeout; allow the
 // full 60s so a real generation can finish instead of dying mid-stream.
@@ -25,7 +33,6 @@ export const maxDuration = 60;
 import {
   CheckpointSchema,
   ConceptSchema,
-  EnrichmentSchema,
   GenerateResultSchema,
   PracticeGroupSchema,
   QuizQuestionSchema,
@@ -242,26 +249,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Generation runs in TWO passes behind one loading state, CONCURRENTLY
-    // (not sequentially — the old code waited for the core pass to finish
-    // before starting enrichment, which added a whole second round trip):
-    //  1. Core pass — the deep modules, concepts, practice, and quiz.
-    //  2. Enrichment pass (best effort, Lite models, 15s cap) — learning
-    //     objectives, cheat sheet, real-world applications, FAQ, and the
-    //     final review quiz. It is derived from the SAME supplied material
-    //     as the core pass (not from the core guide's outline), so it can
-    //     run in parallel with it; the two passes cost max(core, enrich)
-    //     instead of core + enrich, with no extra quota (the old flow
-    //     already made two calls per generation). If it fails or time is
-    //     short, the core guide is still returned complete.
+    // Generation runs in ONE pass here — the CORE guide only (deep
+    // modules, concepts, practice, and quiz). The finishing sections
+    // (objectives, cheat sheet, real-world applications, FAQ, final
+    // review) used to run as a second pass inside this same request,
+    // concurrently with the core pass. That still overran Vercel's
+    // 60s function timeout: the wall clock was only checked *between*
+    // attempts, so an enrichment attempt started at ~44s ran its full
+    // 15s cap to ~59s while the core pass could run 35s + 20s, and
+    // the request was still working when Vercel killed it (HTTP 504
+    // on a full generation, while a lighter one finished in ~14s).
+    // The finishing sections now live in /api/enrich, which the
+    // client calls AFTER the core guide lands — a slow finishing
+    // pass can no longer fail a generation the core pass already
+    // served, and a failed enrichment simply leaves those sections
+    // absent (the guide is complete without them).
     //
-    // Walk the model fallback chain. Each model is tried at most once per
-    // shape — retrying the same overloaded model just burns its free quota.
-    // The core full-shape attempt is capped at 35s (up from 25s — a full
-    // guide can legitimately need ~30s to write, and aborting a
-    // nearly-finished generation at 25s just wastes the work and forces a
-    // retry). The whole generation stays inside a 45s wall clock so the
-    // request fits the 60s function timeout. A real guide in the simpler
+    // Walk the model fallback chain. Each model is tried at most once
+    // per shape — retrying the same overloaded model just burns its
+    // free quota. The whole core pass stays inside a 40s wall clock
+    // (see lib/generationBudget.ts): every attempt's abort is cut
+    // down to the wall clock REMAINING when the attempt starts, so
+    // an attempt can never run past the budget — the old code's
+    // 35s + 20s per-model caps could. A real guide in the simpler
     // shape beats a 500.
     const startedAt = Date.now();
     const simplePrompt = `${systemPrompt} IMPORTANT — simplified shape for this attempt: return at most 2 modules with at most 3 concepts each, concept cards with targeted practice only. Do NOT include a checkpoint, a reasoning example, or core ideas in this attempt. Keep everything short.`;
@@ -274,7 +284,10 @@ export async function POST(req: NextRequest) {
       let lastErr: unknown = null;
       let attempts = 0;
       for (const model of models) {
-        if (attempts >= models.length || Date.now() - startedAt >= 45000)
+        if (
+          attempts >= models.length ||
+          remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000
+        )
           break;
         try {
           attempts += 1;
@@ -285,14 +298,23 @@ export async function POST(req: NextRequest) {
             messages: [{ role: "user", content }],
             maxTokens: 8192,
             maxRetries: 0,
-            abortSignal: AbortSignal.timeout(35000),
+            abortSignal: AbortSignal.timeout(
+              attemptTimeoutMs(
+                startedAt,
+                GENERATE_WALL_CLOCK_MS,
+                GENERATE_FULL_ATTEMPT_MS
+              )
+            ),
           });
           return { core: object, modelUsed: model, lastErr };
         } catch (fullErr) {
           lastErr = fullErr;
           logError("[/api/generate] full-shape attempt failed:", fullErr);
           if (isRetryableProviderError(fullErr)) continue;
-          if (attempts >= models.length || Date.now() - startedAt >= 45000)
+          if (
+            attempts >= models.length ||
+            remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < 5000
+          )
             break;
           try {
             attempts += 1;
@@ -303,7 +325,13 @@ export async function POST(req: NextRequest) {
               messages: [{ role: "user", content }],
               maxTokens: 3072,
               maxRetries: 0,
-              abortSignal: AbortSignal.timeout(20000),
+              abortSignal: AbortSignal.timeout(
+                attemptTimeoutMs(
+                  startedAt,
+                  GENERATE_WALL_CLOCK_MS,
+                  GENERATE_SIMPLE_ATTEMPT_MS
+                )
+              ),
             });
             return {
               core: {
@@ -329,33 +357,7 @@ export async function POST(req: NextRequest) {
       return { core: null, modelUsed: null, lastErr };
     })();
 
-    const enrichmentPromise = (async (): Promise<z.infer<
-      typeof EnrichmentSchema
-    > | null> => {
-      const enrichmentPrompt = `You are StudySMART. A study guide is being generated from a student's notes below. Add the finishing sections for it, derived STRICTLY from the notes below — do not invent new facts, do not add topics that are not in the notes. The notes may be just a topic name: in that case write from your own knowledge of that topic. Never write that notes, content, or information is missing, and never return a blank or placeholder item — every objective and every real-life application must contain real content, or be left out entirely. Write 3 to 6 learning objectives (what the student will be able to do after studying this guide), a one-page cheat sheet in Markdown (only the essential definitions, formulas, and steps from the whole guide — the page a student glances at right before the test), 3 to 5 real-world applications (where this topic actually shows up in real life), 4 to 6 frequently asked questions a student would actually ask, with clear direct answers, and a final review quiz of 5 to 10 multiple-choice questions covering the whole guide, each with options, the correct answer, an explanation of why the correct answer works, and one whyWrong entry for EACH wrong option saying why that option is wrong.`;
-      for (const liteModel of getLiteModels()) {
-        if (Date.now() - startedAt >= 45000) break;
-        try {
-          const { object } = await generateObject({
-            model: liteModel,
-            schema: EnrichmentSchema,
-            system: enrichmentPrompt,
-            messages: [{ role: "user", content }],
-            maxTokens: 2048,
-            maxRetries: 0,
-            abortSignal: AbortSignal.timeout(15000),
-          });
-          return object;
-        } catch (enrichErr) {
-          logError("[/api/generate] enrichment attempt failed:", enrichErr);
-          continue;
-        }
-      }
-      return null;
-    })();
-
-    const [{ core: coreResult, modelUsed, lastErr }, enrichment] =
-      await Promise.all([corePromise, enrichmentPromise]);
+    const { core: coreResult, modelUsed, lastErr } = await corePromise;
     // Sanitize FIRST: strip any refusal / blank / broken content the
     // model produced, so the checks below judge the guide the student
     // would actually see — not the raw model output.
@@ -381,8 +383,9 @@ export async function POST(req: NextRequest) {
     // model that already answered; the repaired guide is kept only
     // when it has strictly fewer problems than the original (or none
     // at all) — the repair never fails the request and never ships a
-    // worse guide. The repair only starts with at least 20s of the
-    // 60s function timeout left, so the request still finishes in time.
+    // worse guide. The repair only starts when the core landed early
+    // enough (see GENERATE_REPAIR_AFTER_MS) and its abort is cut to
+    // the wall clock remaining, so the request still finishes in time.
     const checkOpts = {
       extractConcepts: !!extractConcepts,
       includeQuiz: !!includeQuiz,
@@ -390,7 +393,11 @@ export async function POST(req: NextRequest) {
     const missing = missingParts(core, checkOpts);
     const quality = qualityIssues(core, checkOpts);
     const problemCount = missing.length + quality.length;
-    if (problemCount > 0 && modelUsed && Date.now() - startedAt < 30000) {
+    if (
+      problemCount > 0 &&
+      modelUsed &&
+      Date.now() - startedAt < GENERATE_REPAIR_AFTER_MS
+    ) {
       // The repair minimum follows the study time, so a short-session
       // guide is not "repaired" into a long one.
       const minModules = repairMinModules(hours);
@@ -404,7 +411,13 @@ export async function POST(req: NextRequest) {
           messages: [{ role: "user", content }],
           maxTokens: 8192,
           maxRetries: 0,
-          abortSignal: AbortSignal.timeout(20000),
+          abortSignal: AbortSignal.timeout(
+            attemptTimeoutMs(
+              startedAt,
+              GENERATE_WALL_CLOCK_MS,
+              GENERATE_REPAIR_ATTEMPT_MS
+            )
+          ),
         });
         const repaired = sanitizeGuide(object);
         const repairedProblems =
@@ -437,10 +450,12 @@ export async function POST(req: NextRequest) {
     const givenResources = parseGivenResources({ text, images, files });
 
     // Sanitize the assembled guide once more: the enrichment pass
-    // (objectives, cheat sheet, applications, FAQ, final review) runs
-    // on a separate model call, so its output is cleaned here too —
-    // a blank objective or a refusal in the cheat sheet is dropped
-    // rather than rendered.
+    // (objectives, cheat sheet, applications, FAQ, final review) now
+    // runs in /api/enrich AFTER this response lands, so the finishing
+    // sections are empty here — the client merges them in when they
+    // arrive. The core guide is complete without them, and the UI
+    // already omits empty sections (the same state as when the old
+    // in-route enrichment pass failed).
     const response = sanitizeGuide({
       topicType: core.topicType,
       languageCode: core.languageCode,
@@ -453,12 +468,11 @@ export async function POST(req: NextRequest) {
       keyConcepts: core.keyConcepts ?? [],
       modules: core.modules ?? [],
       quiz: includeQuiz ? core.quiz ?? [] : undefined,
-      objectives: enrichment?.objectives ?? core.objectives ?? [],
-      cheatSheet: enrichment?.cheatSheet ?? core.cheatSheet,
-      realWorldApplications:
-        enrichment?.realWorldApplications ?? core.realWorldApplications ?? [],
-      faq: enrichment?.faq ?? core.faq ?? [],
-      finalReview: enrichment?.finalReview ?? core.finalReview,
+      objectives: [],
+      cheatSheet: undefined,
+      realWorldApplications: [],
+      faq: [],
+      finalReview: undefined,
     });
     return NextResponse.json(response);
   } catch (err) {

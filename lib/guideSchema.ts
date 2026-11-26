@@ -365,10 +365,13 @@ export type GuideJson = z.infer<typeof GenerateResultSchema>;
 
 /**
  * Guide-level finishing sections, generated in a second, lighter pass
- * after the core modules land — so a deep guide still fits the 60s
- * function timeout. Everything here is derived strictly from the guide
- * content, never invented. Best effort: if this pass fails, the core
- * guide is still returned complete.
+ * AFTER the core guide lands — via /api/enrich, which the client calls
+ * once /api/generate has returned. They used to run inside /api/generate
+ * and pushed full generations past Vercel's 60s timeout (HTTP 504), so
+ * they moved out: a slow finishing pass can no longer fail a
+ * generation the core pass already served. Everything here is derived
+ * strictly from the guide content, never invented. Best effort: if
+ * this pass fails, the core guide is still returned complete.
  */
 export const EnrichmentSchema = z.object({
   objectives: z

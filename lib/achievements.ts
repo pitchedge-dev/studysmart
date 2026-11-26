@@ -23,6 +23,18 @@
  * out). When signed in they are ALSO inserted into the `achievements`
  * Supabase table (migration 0008) — best effort only: if the table does
  * not exist yet the sync fails silently and local state keeps working.
+ *
+ * Storage keys are scoped per user, exactly like lib/activity.ts:
+ * signed-out achievements live under the legacy key, and every
+ * signed-in account gets its own key. The old code used ONE shared key
+ * for everybody, so a brand-new account on a device where another
+ * account had earned achievements INHERITED them — the Achievements
+ * section showed Battle Arena certificates (with "Earned <date>" and a
+ * View certificate button) for games that account never played, with
+ * 0 progress toward them. A new account now starts at zero earned.
+ * The legacy key's contents are never copied into a signed-in
+ * account's key (they cannot be attributed to one account — that is
+ * the leak); a signed-in user's earned set is restored from Supabase.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -268,11 +280,23 @@ export type EarnedAchievement = {
   earnedAt: string;
 };
 
-const STORAGE_KEY = "studysmart-achievements:v1";
+const LEGACY_STORAGE_KEY = "studysmart-achievements:v1";
 
-function loadLocal(): EarnedAchievement[] {
+/**
+ * The localStorage key for an account's earned achievements: the
+ * legacy key when signed out, a per-account key when signed in. A
+ * brand-new account therefore loads an empty earned set instead of
+ * inheriting the previous account's certificates from this device.
+ */
+export function storageKeyFor(userId: string | null): string {
+  if (!userId) return LEGACY_STORAGE_KEY;
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "");
+  return `${LEGACY_STORAGE_KEY}:${safe}`;
+}
+
+function loadLocal(key: string): EarnedAchievement[] {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as EarnedAchievement[];
     return Array.isArray(parsed)
@@ -283,9 +307,9 @@ function loadLocal(): EarnedAchievement[] {
   }
 }
 
-function saveLocal(earned: EarnedAchievement[]): void {
+function saveLocal(earned: EarnedAchievement[], key: string): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(earned));
+    window.localStorage.setItem(key, JSON.stringify(earned));
   } catch {
     // Storage unavailable — achievements stay in memory for this session.
   }
@@ -375,13 +399,24 @@ export function useAchievements(
   earnedRef.current = earned;
   const userRef = useRef(userId);
   userRef.current = userId;
+  // The storage key for whoever is signed in right now. Refs (not
+  // state) so the callbacks below always read/write the current
+  // user's key, even if the user changed between render and callback.
+  const keyRef = useRef(storageKeyFor(userId));
+  keyRef.current = storageKeyFor(userId);
 
-  // Load local earned set on mount; merge Supabase rows when signed in.
+  // Load the current user's earned set on mount AND whenever the
+  // signed-in user changes (sign-in, sign-out, account switch):
+  // each account sees only its own earned achievements. A brand-new
+  // account loads an empty set — 0 earned, no certificates for games
+  // it never played. The celebration banner resets too, so one
+  // account never celebrates another account's unlocks.
   useEffect(() => {
-    setEarned(loadLocal());
+    setEarned(loadLocal(keyRef.current));
+    setNewlyUnlocked([]);
     setLoaded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId || !loaded) return;
@@ -395,7 +430,7 @@ export function useAchievements(
           if (!ids.has(r.id)) merged.push(r);
         }
         if (merged.length === prev.length) return prev;
-        saveLocal(merged);
+        saveLocal(merged, keyRef.current);
         return merged;
       });
     });
@@ -417,7 +452,7 @@ export function useAchievements(
     }));
     setEarned((prev) => {
       const next = [...prev, ...added];
-      saveLocal(next);
+      saveLocal(next, keyRef.current);
       return next;
     });
     setNewlyUnlocked((prev) => [
