@@ -160,6 +160,14 @@ export function totalQuestions(days: Record<string, ActivityDay>): number {
   return Object.values(days).reduce((n, d) => n + d.questionsAnswered, 0);
 }
 
+/** All completed 25-minute focus sessions, across all days — the
+ *  same total the Achievements section reads (see
+ *  computeAchievementStats in lib/achievements.ts). A fresh account
+ *  has none, so this is 0 until a session is actually finished. */
+export function totalFocusSessions(days: Record<string, ActivityDay>): number {
+  return Object.values(days).reduce((n, d) => n + (d.focusSessions ?? 0), 0);
+}
+
 /** Best-effort sync of one day to Supabase. Silently no-ops when the
  *  study_activity table does not exist yet or the user is signed out. */
 async function syncDayToSupabase(
@@ -274,6 +282,13 @@ export type ActivityApi = {
   today: ActivityDay;
   todayGoalDone: boolean;
   totalQuestionsAnswered: number;
+  /** All completed 25-minute focus sessions, across all days — the
+   *  same total the Achievements section shows. The home Focus card
+   *  reads this, never a component-local count, so the two can never
+   *  disagree (a local count reset to 0 every time the card
+   *  remounted — that was the 2026-11-25 "0 focus sessions done"
+   *  vs "1 focus session" bug). */
+  totalFocusSessions: number;
   /** Milestone just crossed (3/7/14/30) that has not been celebrated yet. */
   milestone: number | null;
   dismissMilestone: () => void;
@@ -480,6 +495,7 @@ export function useActivity(userId: string | null): ActivityApi {
   const xp = totalXp(state.days);
   const today = state.days[todayKey()] ?? emptyDay(todayKey());
   const totalQuestionsAnswered = totalQuestions(state.days);
+  const totalFocusSessionsCount = totalFocusSessions(state.days);
 
   // First uncelebrated milestone the current streak has reached.
   const milestone =
@@ -506,6 +522,7 @@ export function useActivity(userId: string | null): ActivityApi {
     today,
     todayGoalDone: today.questionsAnswered >= DAILY_GOAL_QUESTIONS,
     totalQuestionsAnswered,
+    totalFocusSessions: totalFocusSessionsCount,
     milestone,
     dismissMilestone,
     recordQuestion,

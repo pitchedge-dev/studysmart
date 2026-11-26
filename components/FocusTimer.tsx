@@ -64,15 +64,23 @@ function formatMs(ms: number): string {
 
 export default function FocusTimer({
   onFocusComplete,
+  completedSessions,
 }: {
   /** Called once when a 25-minute focus block finishes. */
   onFocusComplete: () => void;
+  /** All completed 25-minute focus sessions, across all days, from
+   *  the recorded activity state (the same total the Achievements
+   *  section shows). The card must never keep its own count: a
+   *  component-local count reset to 0 every time the card remounted
+   *  (switching sections unmounts it), which is how the home card
+   *  showed "0 focus sessions done" right after a session the
+   *  Achievements section counted as 1 (2026-11-25). */
+  completedSessions: number;
 }) {
   const [mode, setMode] = useState<Mode>("focus");
   const [endAt, setEndAt] = useState<number | null>(null);
   const [remaining, setRemaining] = useState<number>(FOCUS_MS);
   const [rounds, setRounds] = useState(0);
-  const [completedToday, setCompletedToday] = useState(0);
   const completedRef = useRef(false);
   const onFocusCompleteRef = useRef(onFocusComplete);
   onFocusCompleteRef.current = onFocusComplete;
@@ -134,7 +142,6 @@ export default function FocusTimer({
         persist(mode, null, rounds);
         if (mode === "focus" && !completedRef.current) {
           completedRef.current = true;
-          setCompletedToday((c) => c + 1);
           const nextRounds = rounds + 1;
           setRounds(nextRounds);
           onFocusCompleteRef.current();
@@ -165,8 +172,8 @@ export default function FocusTimer({
           <Timer className="h-4 w-4 text-brand-600" /> Focus timer
         </p>
         <span className="chip">
-          <Zap className="h-3.5 w-3.5" /> {completedToday} focus{" "}
-          {completedToday === 1 ? "session" : "sessions"} done
+          <Zap className="h-3.5 w-3.5" /> {completedSessions} focus{" "}
+          {completedSessions === 1 ? "session" : "sessions"} done
         </span>
       </div>
       <p className="mt-1 text-xs leading-relaxed text-ink-400">

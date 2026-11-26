@@ -56,21 +56,26 @@ export const QuizQuestionSchema = z.object({
     ),
 });
 
-/** A step-by-step worked example with real numbers or a concrete case:
- *  the problem, each working step in order, and the final answer.
- *  One-line examples do not teach — the steps are the teaching. */
+/** A step-by-step worked example that is SOLVED WITH A REAL NUMERIC
+ *  CALCULATION: the problem states real numbers from the topic, at
+ *  least one step shows the arithmetic written out, and the answer is
+ *  the computed result. A step-by-step story with no numbers is not a
+ *  worked example — it does not teach the student to work anything
+ *  out. (Live proof, 2026-11-25: a guide whose every concept had
+ *  Step 1–3 + Answer but no numbers at all, including one that said
+ *  "Calculate the effect..." and then calculated nothing.) */
 export const WorkedExampleSchema = z.object({
   problem: z
     .string()
-    .describe("The worked-example problem — a concrete case with real numbers, dates, values, or a specific situation from the material."),
+    .describe("The worked-example problem — it must state real numbers from the topic (counts, rates, percentages, doses, concentrations, sizes, or dates) and pose a problem that is solved by calculating with them."),
   steps: z
     .array(z.string())
     .min(2)
     .max(6)
-    .describe("The working, step by step, in order — each step shows one calculation, decision, or piece of reasoning. At least 2 steps."),
+    .describe("The working, step by step, in order — each step shows one calculation, decision, or piece of reasoning. At least 2 steps, and at least one step MUST show the arithmetic written out (for example '2,000 × 60 = 120,000' or '10% of 500 = 50'). A time range ('1–2 weeks'), a vague count ('millions of'), or the word 'Calculate' with no numbers in the steps does NOT count."),
   answer: z
     .string()
-    .describe("The final answer or outcome of the worked example."),
+    .describe("The final answer — the computed result of the worked example, with its unit."),
 });
 
 export type WorkedExample = z.infer<typeof WorkedExampleSchema>;
@@ -96,7 +101,7 @@ export const ConceptSchema = z.object({
     .string()
     .describe("One worked example for this concept, taken from the supplied material."),
   workedExample: WorkedExampleSchema.optional().describe(
-    "A step-by-step worked example for this concept, with real numbers or a concrete case from the material: the problem, each working step in order, and the final answer. REQUIRED for every concept where numbers, formulas, processes, timelines, or worked cases apply — for example science, maths, history, and anything with a procedure. For a pure vocabulary definition with genuinely no worked case, omit it."
+    "A step-by-step worked example for this concept, SOLVED WITH A REAL NUMERIC CALCULATION: the problem states real numbers from the topic, at least one step shows the arithmetic written out (for example '2,000 × 60 = 120,000'), and the answer is the computed result with its unit. REQUIRED for every concept — for topics that look non-numeric, find the quantitative angle in the topic itself (how many, how fast, how much, what percentage, how long between two dates). For a pure vocabulary definition with genuinely no worked case, omit it."
   ),
   translation: z
     .string()

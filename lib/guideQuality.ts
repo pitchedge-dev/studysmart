@@ -54,6 +54,59 @@ export function containsRefusal(text: string): boolean {
   return REFUSAL_PATTERNS.some((re) => re.test(text));
 }
 
+/** True when the text shows a real numeric calculation: a number
+ *  combined with another number by an arithmetic operator, a number
+ *  after an equals sign, or a percentage of something. A bare digit
+ *  does NOT count — "1–2 weeks" is a time range, "millions of" is a
+ *  vague count, and neither is working anything out. A plain minus
+ *  is deliberately NOT an operator here: "1-2 weeks" is a range,
+ *  while a real subtraction still matches via its equals sign
+ *  ("1799 − 1789 = 10"). */
+export function hasCalculation(text: string): boolean {
+  if (!text) return false;
+  // Number, operator, number — e.g. "2,000 × 60", "10% of 500",
+  // "500 ÷ 2". Commas inside numbers are allowed.
+  if (/\d[\d,]*\s*(×|x|\*|\+|÷|\/)\s*\d/.test(text)) return true;
+  // A number after "=" — the computed result, e.g. "= 120,000".
+  if (/=\s*[\d,]+/.test(text)) return true;
+  // A percentage figure, e.g. "10% of 500".
+  if (/\d[\d,]*\s*%/.test(text)) return true;
+  return false;
+}
+
+type WorkedExampleLike = {
+  steps?: unknown;
+  problem?: unknown;
+  answer?: unknown;
+};
+
+/** True when a structured worked example actually calculates
+ *  something: problem + steps + answer joined, containing a real
+ *  numeric calculation (see hasCalculation). */
+export function workedExampleHasCalculation(
+  w: WorkedExampleLike | null | undefined
+): boolean {
+  if (!w) return false;
+  const parts: string[] = [];
+  if (typeof w.problem === "string") parts.push(w.problem);
+  if (Array.isArray(w.steps)) {
+    for (const s of w.steps) if (typeof s === "string") parts.push(s);
+  }
+  if (typeof w.answer === "string") parts.push(w.answer);
+  return hasCalculation(parts.join(" "));
+}
+
+/** True when a worked-example problem PROMISES a calculation ("Calculate
+ *  the effect...", "Compute...", "Work out...", "Solve for...") — the
+ *  kind of instruction that is a lie when the steps contain no numbers. */
+function promisesCalculation(problem: string): boolean {
+  // \w* after the stems so "Calculate"/"calculating"/"Compute" match:
+  // a bare trailing \b would fail mid-word ("calculat" + "e").
+  return /\b(calculat\w*|comput\w*|solve for|work out|find the (total|difference|sum|product|rate|percentage))\b/i.test(
+    problem
+  );
+}
+
 /** Split text into sentences/lines and drop any that are refusal or
  *  placeholder filler. Returns the cleaned text (empty string when
  *  nothing real is left). */
@@ -299,6 +352,23 @@ export function sanitizeGuide<T extends GuideJson>(guide: T): T {
                 .map((s) => stripRefusalSentences(s))
                 .filter((s) => s.length > 0);
             }
+            // A worked example that PROMISES a calculation ("Calculate
+            // the effect...") but whose steps contain no numbers is a
+            // fake instruction — drop it whole rather than ship it.
+            // The quality check below then sees the guide has no
+            // numeric worked example and triggers the repair pass.
+            // Only the promise is policed here: a numberless worked
+            // example that never claimed to calculate (a concrete
+            // case) stays, and the repair prompt pushes it numeric.
+            if (
+              typeof w.problem === "string" &&
+              promisesCalculation(w.problem) &&
+              !workedExampleHasCalculation(
+                w as unknown as WorkedExampleLike
+              )
+            ) {
+              c.workedExample = undefined;
+            }
           }
         }
       }
@@ -363,11 +433,35 @@ export function sanitizeGuide<T extends GuideJson>(guide: T): T {
 // Quality checks — what the repair pass looks for after sanitizing.
 // ---------------------------------------------------------------------------
 
-type WorkedExampleLike = {
-  steps?: unknown;
-  problem?: unknown;
-  answer?: unknown;
-};
+/** Count concept worked examples with 2+ steps, and how many of
+ *  them actually calculate something. A guide whose worked examples
+ *  are all numberless stories fails the numeric rule even though the
+ *  step structure looks right — that is exactly what the 2026-11-25
+ *  immune-system guide did (6 concepts, Step 1–3 + Answer, zero
+ *  calculations). */
+function countWorkedExamples(guide: GuideJson): {
+  total: number;
+  numeric: number;
+} {
+  let total = 0;
+  let numeric = 0;
+  for (const m of guide.modules ?? []) {
+    for (const c of m.concepts ?? []) {
+      const w = (c as { workedExample?: WorkedExampleLike }).workedExample;
+      if (
+        w &&
+        Array.isArray(w.steps) &&
+        w.steps.filter(
+          (s): s is string => typeof s === "string" && s.trim().length > 0
+        ).length >= 2
+      ) {
+        total += 1;
+        if (workedExampleHasCalculation(w)) numeric += 1;
+      }
+    }
+  }
+  return { total, numeric };
+}
 
 /** True when the guide has at least one real step-by-step worked
  *  example: a structured workedExample with 2+ steps, a reasoning
@@ -471,6 +565,21 @@ export function qualityIssues(
     issues.push(
       "no step-by-step worked example with real numbers or a concrete case (add a workedExample with at least 2 steps to at least one concept, or a full reasoning example)"
     );
+  } else if (guide.topicType !== "language") {
+    // Language guides genuinely have no numbers to calculate with
+    // (a verb conjugation is not an arithmetic problem), so they are
+    // exempt. Every other topic has a quantitative angle, and a guide
+    // whose worked examples never calculate anything teaches the
+    // student to describe, not to work it out — that is the
+    // 2026-11-25 immune-system failure (6 concepts, Step 1–3 +
+    // Answer, zero calculations). The repair regenerates the whole
+    // guide with the numeric rule named, so one issue covers it.
+    const { total, numeric } = countWorkedExamples(guide);
+    if (total > 0 && numeric === 0) {
+      issues.push(
+        `none of the ${total} worked example${total === 1 ? "" : "s"} contains a real numeric calculation — every workedExample must show arithmetic with real numbers from the topic (for example 2,000 × 60 = 120,000); a time range ('1–2 weeks'), a vague count ('millions of'), or the word 'Calculate' with no numbers does not count`
+      );
+    }
   }
   const badMcq = countMcqWithoutDistractorReasons(guide, opts);
   if (badMcq > 0) {

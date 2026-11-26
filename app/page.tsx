@@ -1586,6 +1586,7 @@ export default function Home() {
             </div>
           )}
           <FocusTimer
+            completedSessions={activity.totalFocusSessions}
             onFocusComplete={() => {
               activity.recordFocusSession();
               setCelebration("Focus session done — +25 XP");
