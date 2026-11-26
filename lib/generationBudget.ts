@@ -26,13 +26,23 @@
  * 5s — Moonshot, AIML, SambaNova, Cohere, DeepSeek and Pollinations
  * were never tried. So the caps are now two-tier: the FIRST model in
  * the chain (Gemini 3.8-flash, the proven one) keeps a long cap, and
- * every later model gets a short one. A uniform 12–15s cap for every
- * model would be worse — the only precise measurement is a 2-module
- * guide in 14.2s and full guides were observed at ~25–30s, so a
- * uniform short cap would abort healthy full guides. The long first
- * cap preserves the happy path exactly as today; the short later caps
- * stop one hanging provider from eating the wall, and the 2s break
- * threshold lets the tail use whatever time is left.
+ * every later model gets a long-enough cap of its own.
+ *
+ * The 2026-11-26 12:33 lesson (Vercel logs, one POST /api/generate,
+ * 50.44s, 503): the 12s cap the 02:37 fix chose for later models
+ * could not succeed even on a healthy provider — a 2-module guide
+ * takes 14.2s and full guides ~25–40s, so every later attempt timed
+ * out before the model could answer, and the wall was spent on
+ * attempts that were doomed from the start. The honest trade-off is
+ * FEWER, LONGER attempts: the first attempt keeps its 25s cap, and
+ * every later attempt now gets 20s — enough for a full-shape guide
+ * from a healthy provider. 25s + 20s = 45s leaves 5s for a last try
+ * inside the 50s wall. And when a full-shape attempt times out, the
+ * route now tries the SIMPLIFIED shape on the SAME model with the
+ * remaining time before moving on (see app/api/generate/route.ts):
+ * a slow-but-healthy provider may still land a thin guide, and the
+ * depth floor + repair path already exist for thin guides. A thin
+ * guide that lands beats a 503.
  */
 
 /** /api/generate (core guide only) must answer inside this. */
@@ -42,8 +52,12 @@ export const GENERATE_WALL_CLOCK_MS = 50000;
  *  up to ~25s (see the header comment). */
 export const GENERATE_FIRST_ATTEMPT_MS = 25000;
 /** One full-shape core attempt on any LATER model may take at most
- *  this long — short, so one hanging provider cannot eat the wall. */
-export const GENERATE_FULL_ATTEMPT_MS = 12000;
+ *  this long — 20s, because a healthy provider needs ~15–25s to
+ *  finish a full-shape guide (see the header comment). The previous
+ *  12s cap could not succeed even on a healthy provider: every later
+ *  attempt timed out before the model could answer. Fewer, longer
+ *  attempts beat many short ones that cannot land. */
+export const GENERATE_FULL_ATTEMPT_MS = 20000;
 /** One simplified-shape fallback attempt may take at most this long. */
 export const GENERATE_SIMPLE_ATTEMPT_MS = 15000;
 /** The repair pass only starts when the core landed before this. */

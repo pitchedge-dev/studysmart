@@ -5,6 +5,7 @@ import {
   getModelsFor,
   isOverloadedError,
   isRetryableProviderError,
+  isTimeoutError,
   MISSING_KEY_MESSAGE,
   modelLabel,
   OVERLOADED_MESSAGE,
@@ -218,7 +219,11 @@ export async function POST(req: NextRequest) {
     }
 
     // Long structured guides route to the guide category: Gemini first
-    // (proven structured output here), then Groq, then OpenRouter.
+    // (proven structured output here), then the live providers in
+    // priority order (DeepSeek, Cohere, Pollinations, GitHub Models),
+    // then the billing-dead ones, then the no-key providers — and
+    // resolveSpecs interleaves them round-robin by provider, so one
+    // provider's outage cannot eat the wall (see lib/providers.ts).
     const models = getModelsFor("guides");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
@@ -313,12 +318,62 @@ export async function POST(req: NextRequest) {
       //
       // Two-tier caps (see lib/generationBudget.ts): the FIRST model
       // gets the long cap so a healthy full guide can finish exactly
-      // as today; every later model gets the short cap, so one hanging
-      // provider cannot eat the wall. 2026-11-26 02:37: a 25s cap on
-      // every model let two slow Gemini tries eat 36s of a 40s wall
-      // and the loop broke with 4s left (the old 5s threshold), so
-      // Moonshot, AIML, SambaNova, Cohere, DeepSeek and Pollinations
-      // were never tried. The loop now breaks only under 2s remaining.
+      // as today; every later model gets a 20s cap — long enough for
+      // a healthy provider to finish a full-shape guide (the old 12s
+      // cap could not succeed even on a healthy provider, 2026-11-26
+      // 12:33). The loop now breaks only under 2s remaining.
+      //
+      // When a full-shape attempt TIMES OUT, the same model gets one
+      // try at the SIMPLIFIED shape with the remaining time before
+      // the chain moves on: a timeout means the provider was slow,
+      // not wrong, and a smaller shape may still land in time. A
+      // thin guide that lands beats a 503, and the depth floor +
+      // repair path below already exist for thin guides. Other
+      // retryable errors (overload, billing, 4xx, bad JSON) skip the
+      // simplified try — a smaller shape on a broken provider does
+      // not help — and the chain moves to the next model. A
+      // non-retryable error keeps the old behaviour: one simplified
+      // try on the same model, then move on.
+      const trySimplified = async (
+        model: LanguageModel
+      ): Promise<z.infer<typeof GenerateResultSchema> | null> => {
+        if (
+          remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < MIN_REMAINING_MS
+        )
+          return null;
+        try {
+          const { object } = await generateObject({
+            model,
+            schema: SimpleGenerateResultSchema,
+            system: simplePrompt,
+            messages: [{ role: "user", content }],
+            maxTokens: 3072,
+            maxRetries: 0,
+            abortSignal: AbortSignal.timeout(
+              attemptTimeoutMs(
+                startedAt,
+                GENERATE_WALL_CLOCK_MS,
+                GENERATE_SIMPLE_ATTEMPT_MS
+              )
+            ),
+          });
+          return {
+            ...object,
+            modules: (object.modules ?? []).map((m) => ({
+              ...m,
+              format: m.format ?? "mixed",
+            })),
+          } as z.infer<typeof GenerateResultSchema>;
+        } catch (simpleErr) {
+          lastErr = simpleErr;
+          logError(
+            `[/api/generate] simplified-shape attempt failed (${modelLabel(model)}):`,
+            simpleErr
+          );
+          return null;
+        }
+      };
+
       for (let i = 0; i < models.length; i++) {
         const model = models[i];
         if (remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < MIN_REMAINING_MS)
@@ -348,46 +403,18 @@ export async function POST(req: NextRequest) {
             `[/api/generate] full-shape attempt failed (${modelLabel(model)}):`,
             fullErr
           );
-          if (isRetryableProviderError(fullErr)) continue;
-          if (
-            remainingMs(startedAt, GENERATE_WALL_CLOCK_MS) < MIN_REMAINING_MS
-          )
-            break;
-          try {
-            const { object } = await generateObject({
-              model,
-              schema: SimpleGenerateResultSchema,
-              system: simplePrompt,
-              messages: [{ role: "user", content }],
-              maxTokens: 3072,
-              maxRetries: 0,
-              abortSignal: AbortSignal.timeout(
-                attemptTimeoutMs(
-                  startedAt,
-                  GENERATE_WALL_CLOCK_MS,
-                  GENERATE_SIMPLE_ATTEMPT_MS
-                )
-              ),
-            });
-            return {
-              core: {
-                ...object,
-                modules: (object.modules ?? []).map((m) => ({
-                  ...m,
-                  format: m.format ?? "mixed",
-                })),
-              } as z.infer<typeof GenerateResultSchema>,
-              modelUsed: model,
-              lastErr,
-            };
-          } catch (simpleErr) {
-            lastErr = simpleErr;
-            logError(
-              `[/api/generate] simplified-shape attempt failed (${modelLabel(model)}):`,
-              simpleErr
-            );
+          if (isTimeoutError(fullErr)) {
+            // Slow, not wrong: one simplified try on the same model
+            // with the remaining time, then move on either way.
+            const simpleCore = await trySimplified(model);
+            if (simpleCore)
+              return { core: simpleCore, modelUsed: model, lastErr };
             continue;
           }
+          if (isRetryableProviderError(fullErr)) continue;
+          const simpleCore = await trySimplified(model);
+          if (simpleCore)
+            return { core: simpleCore, modelUsed: model, lastErr };
         }
       }
       return { core: null, modelUsed: null, lastErr };

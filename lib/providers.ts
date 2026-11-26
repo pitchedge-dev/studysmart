@@ -17,14 +17,30 @@ import type { LanguageModel } from "ai";
  * (docs/api-hunt-2026-11-25.md) tested ~50 candidates and added
  * Pollinations (no key at all — verified live) and GitHub Models
  * (gated on GITHUB_TOKEN, NOT yet live-verified: the POST test was
- * blocked by an approval timeout, so it sits LAST and only activates
- * once a key is set); the mix-and-match pass (2026-11-25) wired the
+ * blocked by an approval timeout, so it sits after Pollinations and
+ * only activates once a key is set); the mix-and-match pass (2026-11-25) wired the
  * six remaining free signups from that hunt — SiliconFlow, AIML API,
  * Hugging Face, Moonshot, Zhipu, Qwen/DashScope — and reordered every
  * category so each job leads with the provider
  * best suited to it (strongest reasoning for guides, fastest for chat
  * and lite templates, strictest JSON for practice/games, vision-only
  * for check-reasoning), instead of one shared fallback order.
+ *
+ * 2026-11-26 — the chains are now INTERLEAVED round-robin by
+ * provider (see interleaveSpecs, applied in resolveSpecs): the lists
+ * below are written grouped by provider, but the order actually
+ * tried is first model of each provider, then second model of each,
+ * and so on. The 12:33 outage that day proved why: all four Gemini
+ * models were tried first (overload, then three 12s timeouts),
+ * Moonshot / AIML / SambaNova then failed fast on billing, and the
+ * 50s wall ran out with DeepSeek and Pollinations never tried.
+ * Interleaving keeps the provider priority — the first provider in
+ * each list still goes first — but one provider's outage can no
+ * longer eat the wall. The same day, Moonshot / AIML / SambaNova
+ * were proven BILLING-DEAD (free credits exhausted / card required,
+ * Vercel logs 12:33:57 CST), so they sit AFTER the live providers
+ * in every list below. If a billing-dead provider's balance is ever
+ * restored, move it back up; do not delete the entries.
  *
  * A provider with no key set is skipped silently, so the app works
  * exactly as before with only the Gemini key set. Keys come ONLY from
@@ -44,40 +60,56 @@ import type { LanguageModel } from "ai";
  *     If it does, skip it — the chain works without it.
  *  6. SambaNova — free, no card: 20 RPM, 20 req/day per model,
  *     200K tokens/day per model.
+ *     BILLING-DEAD 2026-11-26: the key's account needs a payment
+ *     method on file ("A payment method is required") — its free
+ *     credits are gone, so it sits AFTER the live providers in every
+ *     chain until/unless that changes (no card is ever added here).
  *  7. Cohere — trial key free, no card: 1,000 calls/month, 20 RPM.
  *     Trial keys are evaluation-only.
  *  8. Cloudflare Workers AI — free, no card: 10,000 Neurons/day,
  *     300 RPM. Needs TWO env vars: API token + account ID.
  *  9. DeepSeek — 5M free tokens on signup, no card, VALID 30 DAYS.
- *     NOT an ongoing free tier — it expires, so it sits last-but-one.
+ *     NOT an ongoing free tier — it expires, so it used to sit
+ *     last-but-one. But it is ALIVE now (grant valid until ~Dec 25,
+ *     2026) and its base URL was fixed 2026-11-26 (it 404d before),
+ *     so it is reached EARLY in every chain while the grant lasts:
+ *     a live provider today beats a dead one with a longer runway.
+ *     Revisit when the grant expires — it will need to drop back.
  * 10. Novita AI — $1 one-time signup credit, no card. Tiny and
  *     one-time, so it sits LAST among the keyed providers. Once it is
  *     spent, it is paid-only.
  * 11. Pollinations — NO KEY AT ALL. Free public text API, verified
  *     live 2026-11-25 (GET returned the exact reply, HTTP 200, ~1.3s;
  *     JSON mode also verified). Rate limits are unpublished and it is
- *     a shared public service, so it sits near the end as the safety
- *     net: it can only fire when every keyed provider failed, which
- *     is exactly when a no-key fallback matters. Its OpenAI-compatible
- *     POST endpoint (used by the AI SDK) is documented but could NOT
- *     be live-tested from this environment (approval timeout) — if it
- *     ever 400s, the chain treats it as retryable and the request
- *     simply ends there, no worse than before.
+ *     a shared public service. It used to sit near the end as the
+ *     safety net; since 2026-11-26 it sits MID-CHAIN, right after the
+ *     live keyed providers — the 12:33 outage proved a no-key
+ *     fallback that is never reached cannot save a request, and
+ *     Pollinations is fast enough to be tried early. Its
+ *     OpenAI-compatible POST endpoint (used by the AI SDK) is
+ *     documented but could NOT be live-tested from this environment
+ *     (approval timeout) — if it ever 400s, the chain treats it as
+ *     retryable and moves on; the chain trying it during a real
+ *     generation is the only way its POST path gets proven, so do
+ *     not probe it directly with curl.
  * 12. GitHub Models — UNVERIFIED. Free with a GitHub token
  *     (GITHUB_TOKEN), model openai/gpt-4.1-mini (fast, vision-capable
  *     per its model card). The inference host IS alive (GET to the
  *     chat-completions path returned HTTP 200 "OK", 0.76s, 2026-11-25),
  *     which refutes the old "retired July 2026" note — but the
  *     authenticated POST test was blocked by an approval timeout, so
- *     this provider is wired but LAST in every chain and only active
- *     once GITHUB_TOKEN is set. Verify with one curl before setting
- *     the key (see docs/api-hunt-2026-11-25.md).
+ *     this provider is wired but sits AFTER Pollinations in every
+ *     chain and only activates once GITHUB_TOKEN is set. Verify with
+ *     one curl before setting the key (see docs/api-hunt-2026-11-25.md).
  * 13. SiliconFlow — free credits on signup, no card. OpenAI-compatible
  *     (api.siliconflow.cn/v1). Qwen 3 / DeepSeek V3.2 for text, Qwen
  *     2.5-VL 72B for vision. Fast and cheap — high in the lite chain.
  * 14. AIML API — free credits on signup, no card. OpenAI-compatible
  *     (api.aimlapi.com/v1). Llama 3.3 70B for text, gpt-4o-mini for
  *     vision. Many models behind one key.
+ *     BILLING-DEAD 2026-11-26: "You've run out of funds" — its free
+ *     credits are exhausted, so it sits AFTER the live providers in
+ *     every chain (see SambaNova above).
  * 15. Hugging Face Inference Providers — free token, no card.
  *     OpenAI-compatible router (router.huggingface.co/v1). Llama 3.1
  *     8B / Qwen 2.5 72B for text, Llama 3.2 11B Vision for vision.
@@ -87,6 +119,10 @@ import type { LanguageModel } from "ai";
  *     (api.moonshot.ai/v1). Kimi K2 (256K context, strong reasoning)
  *     for text, moonshot-v1-8k (fast/cheap) for lite, v1-8k-vision
  *     for vision.
+ *     BILLING-DEAD 2026-11-26: the account is suspended for
+ *     insufficient balance — its free credits are exhausted, so it
+ *     sits AFTER the live providers in every chain (see SambaNova
+ *     above).
  * 17. Zhipu AI (GLM) — free credits on signup, no card.
  *     OpenAI-compatible (open.bigmodel.cn/api/paas/v4). GLM-4.5 for
  *     text, GLM-4.5-Air (fast/cheap) for lite, GLM-4.5V for vision.
@@ -273,7 +309,9 @@ export const DEEPSEEK_TEXT_MODEL = "deepseek-chat";
 
 // ---------------------------------------------------------------------------
 // Novita AI ($1 one-time signup credit, no card — tiny and one-time).
-// Once the $1 is spent it is paid-only, so it sits LAST in every chain.
+// Once the $1 is spent it is paid-only, so it sits last among the
+// keyed providers in every list (its single model is tried in the
+// first interleave round, like every other single-model provider).
 // Model: openai/gpt-oss-120b. Text-only — not in the reasoning chain.
 // ---------------------------------------------------------------------------
 
@@ -397,18 +435,34 @@ export const DASHSCOPE_VISION_MODEL = "qwen2.5-vl-72b-instruct";
 // ---------------------------------------------------------------------------
 // Per-category routing — MIXED AND MATCHED per job (2026-11-25,
 // docs/mix-match-2026-11-25.md). Each category lists its models grouped
-// by provider: the PRIMARY provider first (best for that job), then
-// backups in priority order — 18 providers per text category (primary +
-// up to 17 backups). The same provider appears in several categories,
-// but the ORDER differs per job: strongest reasoning leads guides,
-// fastest/cheapest leads chat and the lite steps, strictest JSON leads
-// practice/games, vision-only models (ordered by vision quality) make
-// up the reasoning chain. Within a provider, models are ordered
-// best-first for the job. Cerebras sits low for guides (8K free-tier
-// context cap) and high for short jobs (fastest). DeepSeek and Novita
-// sit last among the keyed providers (their free access expires / is
-// one-time); after them come Pollinations (no key — the safety net) and
-// GitHub Models (unverified, key-gated, last).
+// How to read the lists below (and what resolveSpecs does with them).
+// The lists are written grouped by provider: the PRIMARY provider
+// first (best for that job), then backups in priority order — 18
+// providers per text category (primary + up to 17 backups). The same
+// provider appears in several categories, but the ORDER differs per
+// job: strongest reasoning leads guides, fastest/cheapest leads chat
+// and the lite steps, strictest JSON leads practice/games, vision-only
+// models (ordered by vision quality) make up the reasoning chain.
+// Within a provider, models are ordered best-first for the job.
+// Cerebras sits low for guides (8K free-tier context cap) and high
+// for short jobs (fastest).
+//
+// Billing-dead providers (Moonshot, AIML, SambaNova — free credits
+// exhausted / card required, proven 2026-11-26) sit AFTER the live
+// providers in every list, never ahead of one. DeepSeek and Novita
+// used to sit last among the keyed providers (their free access
+// expires / is one-time); DeepSeek is ALIVE now, so it is reached
+// early while its grant lasts — see its entry in the header comment.
+// After the live and billing-dead providers come the no-key providers
+// in their old relative order (skipped silently until a key is set),
+// then Pollinations (no key — the safety net, now mid-chain, not
+// last) and GitHub Models (unverified, key-gated).
+//
+// The lists are NOT the try order: resolveSpecs() interleaves them
+// round-robin by provider (see interleaveSpecs), so the order
+// actually tried is first model of each provider, then second model
+// of each, and so on. docs/mix-match-2026-11-25.md shows the
+// resolved (interleaved) order per category.
 // ---------------------------------------------------------------------------
 
 type ProviderKind =
@@ -435,53 +489,66 @@ type ModelSpec = readonly [ProviderKind, string];
 export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
   {
     // Long structured output (guide Markdown + quiz JSON, big schema).
-    // Primary Gemini: proven in this app, 1M context, strong structured
-    // output. Then the strongest free reasoning models — NVIDIA Nemotron
-    // 3 Ultra (10,000/day), OpenRouter Nemotron 3 Ultra (JSON 6/6),
-    // Moonshot Kimi K2 (256K context), Zhipu GLM-4.5, Qwen-Plus — then
-    // Groq 120b (strict json_schema, 500 tok/s, 1,000/day), SiliconFlow
-    // DeepSeek V3.2, AIML Llama 3.3 70B, HF Qwen 2.5 72B, SambaNova,
-    // Cohere, Cloudflare, Cerebras (last among
-    // ongoing — 8K context cap), DeepSeek, Novita, Pollinations (no key),
-    // GitHub Models (unverified, last).
+    // Provider priority (grouped — resolveSpecs interleaves it):
+    // Gemini first (proven in this app, 1M context, strong structured
+    // output), then DeepSeek (ALIVE now — grant until ~Dec 25, 2026;
+    // it used to sit last, see the header comment), Cohere, then the
+    // no-key safety net Pollinations and GitHub Models (unverified,
+    // key-gated), then the billing-dead providers — Moonshot, AIML,
+    // SambaNova (free credits exhausted / card required, 2026-11-26)
+    // — then the no-key providers in their old relative order
+    // (NVIDIA Nemotron 3 Ultra, OpenRouter, Zhipu GLM-4.5, DashScope
+    // Qwen-Plus, Groq, SiliconFlow, Hugging Face, Cloudflare,
+    // Cerebras, Novita). Resolved with all keys set, the try order
+    // is: Gemini 3.8 → DeepSeek → Cohere → Pollinations → GitHub →
+    // Moonshot → AIML → SambaNova → Gemini 3.6 → Gemini 3.5-lite →
+    // Gemini 3.1-lite (plus the no-key providers' models if their
+    // keys are ever set).
     guides: [
       ["google", "gemini-3.8-flash"],
       ["google", "gemini-3.6-flash"],
       ["google", "gemini-3.5-flash-lite"],
       ["google", "gemini-3.1-flash-lite"],
+      ["deepseek", "deepseek-chat"],
+      ["cohere", "command-a-03-2025"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
+      ["moonshot", "kimi-k2-0711-preview"],
+      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
+      ["sambanova", "gpt-oss-120b"],
       ["nvidia", "nvidia/nemotron-3-ultra-550b-a55b"],
       ["openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free"],
       ["openrouter", "openrouter/free"],
-      ["moonshot", "kimi-k2-0711-preview"],
       ["zhipu", "glm-4.5"],
       ["dashscope", "qwen-plus"],
       ["groq", "openai/gpt-oss-120b"],
       ["groq", "openai/gpt-oss-20b"],
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
-      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
-      ["sambanova", "gpt-oss-120b"],
-      ["cohere", "command-a-03-2025"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["cerebras", "gpt-oss-120b"],
-      ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
-      ["pollinations", "openai"],
-      ["github", "openai/gpt-4.1-mini"],
     ],
     // Conversational tutor, short replies — latency is what matters.
     // Primary Groq 20b: ~1,000 tok/s, first token ~0.24s. Then Gemini
-    // Lite, then the fast/cheap small models — Zhipu GLM-4.5-Air,
-    // SiliconFlow Qwen3-8B, DashScope Qwen3-8B — then Cerebras (fastest
-    // of the earlier providers, 1M tokens/day), Cloudflare (300 RPM),
-    // OpenRouter Super VL, NVIDIA, Moonshot v1-8k, SambaNova, Cohere,
-    // AIML, HF, DeepSeek, Novita.
+    // Lite, DeepSeek, Cohere, Pollinations, GitHub Models, then the
+    // billing-dead providers (Moonshot v1-8k, AIML, SambaNova), then
+    // the fast/cheap small models and the rest in their old relative
+    // order (Zhipu Air, SiliconFlow Qwen3-8B, DashScope Qwen3-8B,
+    // Cerebras, Cloudflare, OpenRouter, NVIDIA, Hugging Face, Novita).
     chat: [
       ["groq", "openai/gpt-oss-20b"],
       ["groq", "openai/gpt-oss-120b"],
       ["google", "gemini-3.5-flash-lite"],
       ["google", "gemini-3.1-flash-lite"],
       ["google", "gemini-3.8-flash"],
+      ["deepseek", "deepseek-chat"],
+      ["cohere", "command-a-03-2025"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
+      ["moonshot", "moonshot-v1-8k"],
+      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
+      ["sambanova", "gpt-oss-120b"],
       ["zhipu", "glm-4.5-air"],
       ["siliconflow", "Qwen/Qwen3-8B"],
       ["dashscope", "qwen3-8b"],
@@ -491,144 +558,144 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["openrouter", "openrouter/free"],
       ["nvidia", "openai/gpt-oss-120b"],
-      ["moonshot", "moonshot-v1-8k"],
-      ["sambanova", "gpt-oss-120b"],
-      ["cohere", "command-a-03-2025"],
-      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
-      ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
-      ["pollinations", "openai"],
-      ["github", "openai/gpt-4.1-mini"],
     ],
     // Battle Arena games — short trivia, templates must return in seconds.
     // Primary Groq 20b: fastest by far, and Groq's 1,000 req/day per
     // model is the deepest free allowance for high-volume game traffic.
-    // Then Gemini Lite, Groq 120b (strict JSON), OpenRouter Super VL
-    // (JSON 7/7), then the fast small models (Zhipu Air, SiliconFlow
-    // Qwen3-8B, Cerebras), NVIDIA, Moonshot K2, DashScope, SambaNova,
-    // Cohere, Cloudflare, AIML, HF, DeepSeek, Novita.
+    // Then Gemini Lite, DeepSeek, Cohere, Pollinations, GitHub Models,
+    // then the billing-dead providers (Moonshot K2, AIML, SambaNova),
+    // then the rest in their old relative order (OpenRouter Super VL,
+    // Zhipu Air, SiliconFlow Qwen3-8B, Cerebras, NVIDIA, DashScope,
+    // Cloudflare, Hugging Face, Novita).
     games: [
       ["groq", "openai/gpt-oss-20b"],
       ["groq", "openai/gpt-oss-120b"],
       ["google", "gemini-3.5-flash-lite"],
       ["google", "gemini-3.1-flash-lite"],
       ["google", "gemini-3.8-flash"],
+      ["deepseek", "deepseek-chat"],
+      ["cohere", "command-a-03-2025"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
+      ["moonshot", "kimi-k2-0711-preview"],
+      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
+      ["sambanova", "gpt-oss-120b"],
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["openrouter", "openrouter/free"],
       ["zhipu", "glm-4.5-air"],
       ["siliconflow", "Qwen/Qwen3-8B"],
       ["cerebras", "gpt-oss-120b"],
       ["nvidia", "openai/gpt-oss-120b"],
-      ["moonshot", "kimi-k2-0711-preview"],
       ["dashscope", "qwen-plus"],
-      ["sambanova", "gpt-oss-120b"],
-      ["cohere", "command-a-03-2025"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
-      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
-      ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
-      ["pollinations", "openai"],
-      ["github", "openai/gpt-4.1-mini"],
     ],
     // Small structured question sets — schema reliability matters most
     // (this route failed on a schema mismatch before). Primary Gemini
-    // 3.8: proven structured output here. Then Groq 120b (STRICT
-    // json_schema guarantees), OpenRouter Super VL (JSON 7/7), NVIDIA
-    // Nemotron 3 Ultra, Moonshot Kimi K2, Zhipu GLM-4.5, DashScope
-    // Qwen-Plus, SiliconFlow DeepSeek V3.2, AIML, HF, SambaNova,
-    // Cohere, Cloudflare, Cerebras, DeepSeek, Novita.
+    // 3.8: proven structured output here. Then DeepSeek, Cohere,
+    // Pollinations, GitHub Models, then the billing-dead providers
+    // (Moonshot K2, AIML, SambaNova), then the rest in their old
+    // relative order (Groq 120b strict JSON, OpenRouter Super VL,
+    // NVIDIA Nemotron 3 Ultra, Zhipu, DashScope, SiliconFlow, HF,
+    // Cloudflare, Cerebras, Novita).
     practice: [
       ["google", "gemini-3.8-flash"],
       ["google", "gemini-3.6-flash"],
+      ["deepseek", "deepseek-chat"],
+      ["cohere", "command-a-03-2025"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
+      ["moonshot", "kimi-k2-0711-preview"],
+      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
+      ["sambanova", "gpt-oss-120b"],
       ["groq", "openai/gpt-oss-120b"],
       ["groq", "openai/gpt-oss-20b"],
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["openrouter", "openrouter/free"],
       ["nvidia", "nvidia/nemotron-3-ultra-550b-a55b"],
-      ["moonshot", "kimi-k2-0711-preview"],
       ["zhipu", "glm-4.5"],
       ["dashscope", "qwen-plus"],
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
-      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
-      ["sambanova", "gpt-oss-120b"],
-      ["cohere", "command-a-03-2025"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["cerebras", "gpt-oss-120b"],
-      ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
-      ["pollinations", "openai"],
-      ["github", "openai/gpt-4.1-mini"],
     ],
     // Suggesting real YouTube video IDs — a short, cheap call, so the
     // cheapest allowance leads: Cloudflare (10,000 Neurons/day, 300 RPM).
     // Gemini 3.8 follows immediately (broadest knowledge, proven for
     // video IDs here) — every candidate is verified with oEmbed before
     // it is shown, so a hallucinated ID from a cheap model just costs
-    // one retry, never a fake video. Then Groq 120b, OpenRouter Nemotron
-    // 3 Ultra, NVIDIA Nemotron 3 Ultra, Moonshot K2, Zhipu GLM-4.5,
-    // DashScope Qwen-Plus, SiliconFlow, AIML, HF, SambaNova, Cohere,
-    // Cerebras (Qwen 3 235B), DeepSeek, Novita.
+    // one retry, never a fake video. Then DeepSeek, Cohere,
+    // Pollinations, GitHub Models, then the billing-dead providers
+    // (Moonshot K2, AIML, SambaNova), then the rest in their old
+    // relative order (Groq, OpenRouter, NVIDIA, Zhipu, DashScope,
+    // SiliconFlow, HF, Cerebras, Novita).
     videos: [
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["google", "gemini-3.8-flash"],
       ["google", "gemini-3.5-flash-lite"],
+      ["deepseek", "deepseek-chat"],
+      ["cohere", "command-a-03-2025"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
+      ["moonshot", "kimi-k2-0711-preview"],
+      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
+      ["sambanova", "gpt-oss-120b"],
       ["groq", "openai/gpt-oss-120b"],
       ["groq", "openai/gpt-oss-20b"],
       ["openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free"],
       ["openrouter", "openrouter/free"],
       ["nvidia", "nvidia/nemotron-3-ultra-550b-a55b"],
-      ["moonshot", "kimi-k2-0711-preview"],
       ["zhipu", "glm-4.5"],
       ["dashscope", "qwen-plus"],
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
-      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
-      ["sambanova", "gpt-oss-120b"],
-      ["cohere", "command-a-03-2025"],
       ["cerebras", "qwen-3-235b-a22b-instruct-2507"],
-      ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
-      ["pollinations", "openai"],
-      ["github", "openai/gpt-4.1-mini"],
     ],
     // Vision: reads a handwriting PNG and grades work + process.
     // Text-only models are NOT in this list — sending them an image would
     // just error. Ordered by vision quality: Gemini (proven here), then
-    // OpenRouter Nemotron 3.5 Super VL (20/20 passed), NVIDIA Nemotron
-    // 3.5 Super VL + Llama 3.2 90B Vision, AIML gpt-4o-mini,
-    // DashScope + SiliconFlow Qwen2.5-VL 72B, Zhipu GLM-4.5V, Moonshot
-    // v1-8k-vision, Groq qwen3.8-27b (multimodal + JSON mode, 450 tok/s),
-    // HF Llama 3.2 11B Vision, Cerebras Gemma 4 31B, SambaNova Gemma 4
-    // 31B, Cohere Command A Vision, Cloudflare Llama 3.2 11B Vision,
-    // GitHub gpt-4.1-mini (unverified, last). (DeepSeek and Novita have
-    // no reliable vision model, so they are not in this chain — 16 vision
-    // providers, 18 models.)
+    // Cohere Command A Vision, GitHub gpt-4.1-mini (unverified,
+    // key-gated), then the no-key providers in their old relative
+    // order (OpenRouter Nemotron 3.5 Super VL, 20/20 passed; NVIDIA
+    // Nemotron 3.5 Super VL + Llama 3.2 90B Vision; DashScope +
+    // SiliconFlow Qwen2.5-VL 72B; Zhipu GLM-4.5V; Groq qwen3.8-27b,
+    // multimodal + JSON mode, 450 tok/s; HF Llama 3.2 11B Vision;
+    // Cerebras Gemma 4 31B; Cloudflare Llama 3.2 11B Vision), then the
+    // billing-dead providers (AIML gpt-4o-mini, Moonshot v1-8k-vision,
+    // SambaNova Gemma 4 31B — free credits exhausted, 2026-11-26).
+    // (DeepSeek and Novita have no reliable vision model, so they are
+    // not in this chain — 16 vision providers, 18 models.)
     reasoning: [
       ["google", "gemini-3.8-flash"],
       ["google", "gemini-3.6-flash"],
+      ["cohere", "command-a-vision-07-2025"],
+      ["github", "openai/gpt-4.1-mini"],
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b"],
       ["nvidia", "meta/llama-3.2-90b-vision-instruct"],
-      ["aiml", "gpt-4o-mini"],
       ["dashscope", "qwen2.5-vl-72b-instruct"],
       ["siliconflow", "Qwen/Qwen2.5-VL-72B-Instruct"],
       ["zhipu", "glm-4.5v"],
-      ["moonshot", "moonshot-v1-8k-vision"],
       ["groq", "qwen/qwen3.8-27b"],
       ["huggingface", "meta-llama/Llama-3.2-11B-Vision-Instruct"],
       ["cerebras", "gemma-4-31b"],
-      ["sambanova", "gemma-4-31B-it"],
-      ["cohere", "command-a-vision-07-2025"],
       ["cloudflare", "@cf/meta/llama-3.2-11b-vision-instruct"],
-      ["github", "openai/gpt-4.1-mini"],
+      ["aiml", "gpt-4o-mini"],
+      ["moonshot", "moonshot-v1-8k-vision"],
+      ["sambanova", "gemma-4-31B-it"],
     ],
   } as const;
 
 /** Human-readable routing per category: the primary provider, then the
- *  backups in order. For docs and debugging. */
+ *  backups in provider-priority order (the grouped order in
+ *  CATEGORY_SPECS — the actual try order is interleaved round-robin,
+ *  see interleaveSpecs). For docs and debugging. */
 export const CATEGORY_ROUTING: Record<
   GenerationCategory,
   { primary: string; backups: string[] }
@@ -636,29 +703,36 @@ export const CATEGORY_ROUTING: Record<
   guides: {
     primary: "Gemini (3.8-flash)",
     backups: [
+      "DeepSeek (deepseek-chat, 30-day grant — alive now, reached early)",
+      "Cohere (Command A)",
+      "Pollinations (openai, no key — safety net, mid-chain)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
+      "Moonshot (Kimi K2, billing-dead — free credits exhausted)",
+      "AIML API (Llama 3.3 70B, billing-dead — out of funds)",
+      "SambaNova (gpt-oss-120b, billing-dead — card required)",
       "NVIDIA NIM (Nemotron 3 Ultra, 10,000/day)",
       "OpenRouter (Nemotron 3 Ultra)",
-      "Moonshot (Kimi K2, 256K context)",
       "Zhipu (GLM-4.5)",
       "DashScope (Qwen-Plus)",
       "Groq (gpt-oss-120b, strict JSON)",
       "SiliconFlow (DeepSeek V3.2)",
-      "AIML API (Llama 3.3 70B)",
       "Hugging Face (Qwen 2.5 72B)",
-      "SambaNova (gpt-oss-120b)",
-      "Cohere (Command A)",
       "Cloudflare (gpt-oss-120b)",
       "Cerebras (gpt-oss-120b, 8K context cap)",
-      "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
-      "Pollinations (openai, no key — safety net)",
-      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   chat: {
     primary: "Groq (gpt-oss-20b)",
     backups: [
       "Gemini (3.5-flash-lite)",
+      "DeepSeek (deepseek-chat, 30-day grant — alive now, reached early)",
+      "Cohere (Command A)",
+      "Pollinations (openai, no key — safety net, mid-chain)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
+      "Moonshot (moonshot-v1-8k, billing-dead — free credits exhausted)",
+      "AIML API (Llama 3.3 70B, billing-dead — out of funds)",
+      "SambaNova (gpt-oss-120b, billing-dead — card required)",
       "Zhipu (GLM-4.5-Air, fast/cheap)",
       "SiliconFlow (Qwen3-8B, fast/cheap)",
       "DashScope (Qwen3-8B, fast/cheap)",
@@ -666,100 +740,93 @@ export const CATEGORY_ROUTING: Record<
       "Cloudflare (gpt-oss-120b, 300 RPM)",
       "OpenRouter (Nemotron 3.5 Super VL)",
       "NVIDIA NIM (gpt-oss-120b)",
-      "Moonshot (moonshot-v1-8k)",
-      "SambaNova (gpt-oss-120b)",
-      "Cohere (Command A)",
-      "AIML API (Llama 3.3 70B)",
       "Hugging Face (Llama 3.1 8B)",
-      "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
-      "Pollinations (openai, no key — safety net)",
-      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   games: {
     primary: "Groq (gpt-oss-20b)",
     backups: [
       "Gemini (3.5-flash-lite)",
+      "DeepSeek (deepseek-chat, 30-day grant — alive now, reached early)",
+      "Cohere (Command A)",
+      "Pollinations (openai, no key — safety net, mid-chain)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
+      "Moonshot (Kimi K2, billing-dead — free credits exhausted)",
+      "AIML API (Llama 3.3 70B, billing-dead — out of funds)",
+      "SambaNova (gpt-oss-120b, billing-dead — card required)",
       "OpenRouter (Nemotron 3.5 Super VL)",
       "Zhipu (GLM-4.5-Air, fast/cheap)",
       "SiliconFlow (Qwen3-8B, fast/cheap)",
       "Cerebras (gpt-oss-120b)",
       "NVIDIA NIM (gpt-oss-120b)",
-      "Moonshot (Kimi K2)",
       "DashScope (Qwen-Plus)",
-      "SambaNova (gpt-oss-120b)",
-      "Cohere (Command A)",
       "Cloudflare (gpt-oss-120b)",
-      "AIML API (Llama 3.3 70B)",
       "Hugging Face (Llama 3.1 8B)",
-      "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
-      "Pollinations (openai, no key — safety net)",
-      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   practice: {
     primary: "Gemini (3.8-flash)",
     backups: [
+      "DeepSeek (deepseek-chat, 30-day grant — alive now, reached early)",
+      "Cohere (Command A)",
+      "Pollinations (openai, no key — safety net, mid-chain)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
+      "Moonshot (Kimi K2, billing-dead — free credits exhausted)",
+      "AIML API (Llama 3.3 70B, billing-dead — out of funds)",
+      "SambaNova (gpt-oss-120b, billing-dead — card required)",
       "Groq (gpt-oss-120b, strict JSON)",
       "OpenRouter (Nemotron 3.5 Super VL)",
       "NVIDIA NIM (Nemotron 3 Ultra)",
-      "Moonshot (Kimi K2)",
       "Zhipu (GLM-4.5)",
       "DashScope (Qwen-Plus)",
       "SiliconFlow (DeepSeek V3.2)",
-      "AIML API (Llama 3.3 70B)",
       "Hugging Face (Qwen 2.5 72B)",
-      "SambaNova (gpt-oss-120b)",
-      "Cohere (Command A)",
       "Cloudflare (gpt-oss-120b)",
       "Cerebras (gpt-oss-120b)",
-      "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
-      "Pollinations (openai, no key — safety net)",
-      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   videos: {
     primary: "Cloudflare (gpt-oss-120b, cheapest short call)",
     backups: [
       "Gemini (3.8-flash, proven video IDs)",
+      "DeepSeek (deepseek-chat, 30-day grant — alive now, reached early)",
+      "Cohere (Command A)",
+      "Pollinations (openai, no key — safety net, mid-chain)",
+      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
+      "Moonshot (Kimi K2, billing-dead — free credits exhausted)",
+      "AIML API (Llama 3.3 70B, billing-dead — out of funds)",
+      "SambaNova (gpt-oss-120b, billing-dead — card required)",
       "Groq (gpt-oss-120b)",
       "OpenRouter (Nemotron 3 Ultra)",
       "NVIDIA NIM (Nemotron 3 Ultra)",
-      "Moonshot (Kimi K2)",
       "Zhipu (GLM-4.5)",
       "DashScope (Qwen-Plus)",
       "SiliconFlow (DeepSeek V3.2)",
-      "AIML API (Llama 3.3 70B)",
       "Hugging Face (Qwen 2.5 72B)",
-      "SambaNova (gpt-oss-120b)",
-      "Cohere (Command A)",
       "Cerebras (Qwen 3 235B)",
-      "DeepSeek (deepseek-chat, 30-day grant)",
       "Novita (gpt-oss-120b, $1 credit)",
-      "Pollinations (openai, no key — safety net)",
-      "GitHub Models (gpt-4.1-mini, needs GITHUB_TOKEN — unverified)",
     ],
   },
   reasoning: {
     primary: "Gemini (3.8-flash, vision)",
     backups: [
+      "Cohere (Command A Vision)",
+      "GitHub Models (gpt-4.1-mini, vision, needs GITHUB_TOKEN — unverified)",
       "OpenRouter (Nemotron 3.5 Super VL, vision)",
       "NVIDIA NIM (Nemotron 3.5 Super VL / Llama 3.2 90B Vision)",
-      "AIML API (gpt-4o-mini, vision)",
       "DashScope (Qwen2.5-VL 72B, vision)",
       "SiliconFlow (Qwen2.5-VL 72B, vision)",
       "Zhipu (GLM-4.5V, vision)",
-      "Moonshot (moonshot-v1-8k-vision)",
       "Groq (qwen3.8-27b, vision)",
       "Hugging Face (Llama 3.2 11B Vision)",
       "Cerebras (Gemma 4 31B, vision)",
-      "SambaNova (Gemma 4 31B, vision)",
-      "Cohere (Command A Vision)",
       "Cloudflare (Llama 3.2 11B Vision)",
-      "GitHub Models (gpt-4.1-mini, vision, needs GITHUB_TOKEN — unverified)",
+      "AIML API (gpt-4o-mini, vision, billing-dead — out of funds)",
+      "Moonshot (moonshot-v1-8k-vision, billing-dead — free credits exhausted)",
+      "SambaNova (Gemma 4 31B, vision, billing-dead — card required)",
     ],
   },
 };
@@ -991,12 +1058,60 @@ function buildProviders(): ProviderInstances {
 // the model objects (models are rebuilt per request).
 const MODEL_SPEC_KEYS = new WeakMap<LanguageModel, string>();
 
+/**
+ * Interleave a spec list round-robin by provider: first model of
+ * each provider (in the order the providers first appear), then
+ * second model of each provider, and so on. Providers with a single
+ * model appear once, in round one.
+ *
+ * Why: the CATEGORY_SPECS lists are written grouped by provider
+ * (all four Gemini models together, both Groq models together, ...).
+ * Tried in that order, one provider's outage burns the whole wall —
+ * 2026-11-26 12:33: all four Gemini models went first (overload,
+ * then three 12s timeouts), the billing-dead providers then failed
+ * fast, and the 50s wall ran out with DeepSeek and Pollinations
+ * never tried. Round-robin keeps the provider priority — the first
+ * provider in the list still goes first — but a single provider can
+ * no longer eat the wall: after its first model fails, a different
+ * provider gets the next attempt. Counts are unchanged; only the
+ * order changes. Applied in resolveSpecs(), so every category and
+ * the lite list get it from the same place.
+ */
+function interleaveSpecs(
+  specs: readonly ModelSpec[]
+): readonly ModelSpec[] {
+  const byProvider = new Map<ProviderKind, ModelSpec[]>();
+  for (const spec of specs) {
+    const list = byProvider.get(spec[0]);
+    if (list) list.push(spec);
+    else byProvider.set(spec[0], [spec]);
+  }
+  const out: ModelSpec[] = [];
+  let round = 0;
+  let added = true;
+  while (added) {
+    added = false;
+    for (const list of byProvider.values()) {
+      const spec = list[round];
+      if (spec) {
+        out.push(spec);
+        added = true;
+      }
+    }
+    round++;
+  }
+  return out;
+}
+
 function resolveSpecs(
   specs: readonly ModelSpec[],
   providers: ProviderInstances
 ): LanguageModel[] {
   const out: LanguageModel[] = [];
-  for (const [kind, id] of specs) {
+  // Interleaved try order (see interleaveSpecs): providers are
+  // skipped silently when their key is not set, which preserves the
+  // relative order of the ones that remain.
+  for (const [kind, id] of interleaveSpecs(specs)) {
     const provider = providers[kind];
     if (!provider) continue; // no key set for this provider — skip silently
     // Each provider is callable with a model ID, but their call
@@ -1042,28 +1157,32 @@ export function getModels(): LanguageModel[] {
  *  SambaNova, Cohere, DeepSeek, Novita, Pollinations (no key), GitHub
  *  Models (unverified, last). */
 export function getLiteModels(): LanguageModel[] {
+  // Same provider priority as chat (fastest/cheapest first), with the
+  // live providers first and the billing-dead ones (AIML, Moonshot,
+  // SambaNova) after them. resolveSpecs interleaves this list
+  // round-robin by provider, same as the categories.
   return resolveSpecs(
     [
       ["groq", "openai/gpt-oss-20b"],
       ["google", "gemini-3.5-flash-lite"],
       ["google", "gemini-3.1-flash-lite"],
+      ["deepseek", "deepseek-chat"],
+      ["cohere", "command-a-03-2025"],
+      ["pollinations", "openai"],
+      ["github", "openai/gpt-4.1-mini"],
+      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
+      ["moonshot", "moonshot-v1-8k"],
+      ["sambanova", "gpt-oss-120b"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["zhipu", "glm-4.5-air"],
       ["siliconflow", "Qwen/Qwen3-8B"],
       ["dashscope", "qwen3-8b"],
       ["cerebras", "gpt-oss-120b"],
-      ["aiml", "meta-llama/Llama-3.3-70B-Instruct"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
-      ["moonshot", "moonshot-v1-8k"],
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["openrouter", "openrouter/free"],
       ["nvidia", "openai/gpt-oss-120b"],
-      ["sambanova", "gpt-oss-120b"],
-      ["cohere", "command-a-03-2025"],
-      ["deepseek", "deepseek-chat"],
       ["novita", "openai/gpt-oss-120b"],
-      ["pollinations", "openai"],
-      ["github", "openai/gpt-4.1-mini"],
     ],
     buildProviders()
   );
@@ -1204,8 +1323,34 @@ export function isRetryableProviderError(err: unknown): boolean {
   );
 }
 
+/**
+ * True when an error is a timeout — the attempt ran out of its cap
+ * before the provider answered. Separate from isRetryableProviderError
+ * on purpose: the classifiers above decide whether the chain moves on
+ * to the next model, while this one decides whether the SAME model
+ * gets a second chance at the SIMPLIFIED shape (see
+ * app/api/generate/route.ts). A timeout means the provider was
+ * slow, not wrong: it may still answer a smaller request in the
+ * time that remains. Matches the timeout signals the AI SDK and
+ * fetch produce (TimeoutError, "timed out", "timeout", "aborted"
+ * from an AbortSignal timeout). Deliberately narrow — an overload
+ * error that merely mentions "timeout" in passing is already
+ * retryable and moves on to the next model instead.
+ */
+export function isTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const text = `${err.name} ${err.message}`.toLowerCase();
+  return (
+    err.name === "TimeoutError" ||
+    text.includes("timed out") ||
+    text.includes("timeout") ||
+    text.includes("timedout") ||
+    text.includes("aborted")
+  );
+}
+
 export const MISSING_KEY_MESSAGE =
-  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face, Moonshot, Zhipu, Qwen/DashScope, or a GitHub token) to the environment to generate content — Pollinations (no key) is always tried last.";
+  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face, Moonshot, Zhipu, Qwen/DashScope, or a GitHub token) to the environment to generate content — Pollinations (no key) is always in the chain as a safety net.";
 
 export const OVERLOADED_MESSAGE =
   "All AI providers are busy / out of free calls right now — try again later";

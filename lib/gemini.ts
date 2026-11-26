@@ -29,6 +29,7 @@ export {
   getVisionModels,
   isOverloadedError,
   isRetryableProviderError,
+  isTimeoutError,
   MISSING_KEY_MESSAGE,
   modelLabel,
   OVERLOADED_MESSAGE,
