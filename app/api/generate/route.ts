@@ -244,23 +244,35 @@ export async function POST(req: NextRequest) {
     // cut off mid-string at JSON position 6064). The full prompt
     // above asks for a 2,500–4,000-token guide, so Pollinations can
     // NEVER return one whole. For Pollinations only, the same schema
-    // is requested with a compact prompt: exactly 3 modules × 2
-    // concepts, one short-answer practice problem per concept,
-    // one-sentence explanations, two-step worked examples, a short
-    // studyGuide and at most 2 quiz questions — roughly 1,400 tokens,
-    // which fits the observed budget while still meeting the depth
-    // floor (3 modules, 6 concepts). Every field the schema asks for
-    // is still emitted, with short values — the strict schema
-    // requires every key present, so fields are shortened, never
-    // omitted. Other providers keep the full prompt unchanged. If the
-    // compact attempt still truncates, generateObjectSafe salvages
-    // the partial guide (see lib/safeGenerate.ts).
-    const COMPACT_POLLINATIONS_INSTRUCTION = `IMPORTANT — COMPACT OUTPUT (this attempt only): this provider stops generating after about 1,500 tokens, so the ENTIRE guide must fit in roughly 1,400 tokens. The compact rules below OVERRIDE the length and depth rules above for this attempt only — follow them exactly, and keep every field real and correct, never filler, never a placeholder:
-- Exactly 3 modules with exactly 2 concepts each (6 concepts total).
+    // is requested with a compact prompt. The first compact shape
+    // (3 modules × 2 concepts, estimated ~1,255 tokens) STILL
+    // truncated live — Vercel logs 2026-11-27 09:25:18 CST: cut off
+    // mid-word at JSON position 6759 (~1,690 tokens) with only
+    // 2.5 modules written, because the model writes longer fields
+    // than the prompt's soft length limits allow. So the compact
+    // shape is retargeted to roughly 1,000 tokens even with
+    // overshoot: exactly 2 modules × 2 concepts, very terse fields,
+    // one short-answer practice problem per concept, a short
+    // studyGuide and at most 1 quiz question. DEPTH-FLOOR NOTE: 2
+    // modules / 4 concepts meets the 30-minute floor (1 module, 3
+    // concepts) and the 1-hour floor (2 modules, 4 concepts) but
+    // NOT the 2-hour / no-set-time floor (3 modules, 6 concepts) —
+    // a Pollinations guide for a long session therefore triggers
+    // the one repair attempt, and if the repair cannot beat it the
+    // thin real guide is still returned; the /api/enrich finishing
+    // sections arrive afterwards. A thin real guide beats a 503,
+    // and if the compact attempt still truncates,
+    // generateObjectSafe salvages the partial guide (see
+    // lib/safeGenerate.ts). Every field the schema asks for is
+    // still emitted, with short values — the strict schema requires
+    // every key present, so fields are shortened, never omitted.
+    // Other providers keep the full prompt unchanged.
+    const COMPACT_POLLINATIONS_INSTRUCTION = `IMPORTANT — COMPACT OUTPUT (this attempt only): this provider stops generating after about 1,500 tokens, so the ENTIRE guide must fit in roughly 1,000 tokens — write TIGHT, well under the limit, not near it. The compact rules below OVERRIDE the length and depth rules above for this attempt only — follow them exactly, and keep every field real and correct, never filler, never a placeholder:
+- Exactly 2 modules with exactly 2 concepts each (4 concepts total).
 - One practice problem per concept, and make it SHORT-ANSWER (no options, no whyWrong): a question, a correct answer, and a one-sentence explanation.
-- Every explanation is exactly ONE short sentence. Every worked example has exactly 2 short steps. Every definition, common mistake, and memory tip is one short sentence.
-- studyGuide Markdown under 300 characters. At most 8 key terms, each with a one-line definition.
-- At most 2 quiz questions, with short options; keep one short whyWrong entry per wrong option.
+- Every explanation is exactly ONE short sentence (under 25 words). Every worked example has exactly 2 SHORT steps (each under 10 words) and a short answer. Every definition, common mistake, and memory tip is one short sentence (under 20 words).
+- studyGuide Markdown under 200 characters. At most 6 key terms, each with a one-line definition. At most 6 key concepts.
+- At most 1 quiz question, with short options; omit whyWrong for this attempt.
 - Emit every field the schema asks for, with short values — never omit a field.`;
     const compactSystemPrompt = `${systemPrompt}\n\n${COMPACT_POLLINATIONS_INSTRUCTION}`;
     /** The system prompt for one model: compact for Pollinations

@@ -120,13 +120,21 @@ import type { LanguageModel } from "ai";
  *     per-request time limit; our side sends max_completion_tokens:
  *     8192 and the 20s abort did not fire, so we are not the
  *     limiter. Two consequences: (1) /api/generate asks Pollinations
- *     for a COMPACT guide (~1,400 tokens: 3 modules × 2 concepts,
- *     terse fields) instead of the full prompt, which it can never
- *     finish; (2) every generateObject call goes through
- *     generateObjectSafe (lib/safeGenerate.ts), which salvages a
- *     truncated response into the guide it already wrote instead of
- *     failing the attempt. Do not ask Pollinations for a full-size
- *     guide again — it will truncate.
+ *     for a COMPACT guide (retargeted 2026-11-27 to ~1,000 tokens:
+ *     2 modules × 2 concepts, very terse fields — the first compact
+ *     shape at ~1,400 tokens STILL truncated live at JSON position
+ *     6759, Vercel logs 09:25:18 CST, because the model writes
+ *     longer than the prompt's soft limits allow) instead of the
+ *     full prompt, which it can never finish; (2) every
+ *     generateObject call goes through generateObjectSafe
+ *     (lib/safeGenerate.ts), which salvages a truncated response
+ *     into the guide it already wrote instead of failing the
+ *     attempt — including a PARTIAL salvage that fills missing
+ *     top-level fields with honest empty defaults, added after the
+ *     09:26 failure showed the strict-only salvage returning null
+ *     when the required scalar fields trail the truncation point.
+ *     Do not ask Pollinations for a full-size guide again — it will
+ *     truncate.
  * 12. GitHub Models — UNVERIFIED. Free with a GitHub token
  *     (GITHUB_TOKEN), model openai/gpt-4.1-mini (fast, vision-capable
  *     per its model card). The inference host IS alive (GET to the
