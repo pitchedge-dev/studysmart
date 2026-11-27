@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
 import { z } from "zod";
 import {
   getModelsFor,
@@ -9,7 +8,7 @@ import {
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
 import { cleanQuestions, repairQuestion } from "@/lib/arenaQuestions";
-import { schemaForModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 // Game/template shapes live in lib/routeSchemas.ts (moved there so the
 // strict-schema logic test can import the real definitions — Next.js
 // route files may not export anything but route fields).
@@ -171,11 +170,12 @@ export async function POST(req: NextRequest) {
       let lastErr: unknown = null;
       for (const model of models) {
         try {
-          const { object } = await generateObject({
+          const { object } = await generateObjectSafe({
             model,
-            // Pollinations enforces strict JSON Schema (see
-            // lib/strictSchema.ts) — it gets the strictified schema.
-            schema: schemaForModel(model, TemplatesSchema),
+// The wrapper applies schemaForModel internally (see
+            // lib/strictSchema.ts) and salvages a truncated response
+            // instead of failing the attempt (lib/safeGenerate.ts).
+            zodSchema: TemplatesSchema,
             system: `You are StudySMART's Battle Arena game designer. ${topicHint}${optionGuidance ? `${optionGuidance} ` : ""}Dream up exactly 3 DIFFERENT game ideas for the supplied topic or notes — make the game types different from each other where the topic allows (for example trivia race, flashcards, matching, quiz showdown, timed speed drill). These are INCOMPLETE previews, not full games: for each idea give only a short title, the game type, one line describing how it plays, and 1–2 sample questions with four options and the correct answer, all taken strictly from the supplied material. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Keep every description to one short line.`,
             prompt: `Topic / notes to dream up game ideas from:\n\n${topicOrNotes}`,
             maxTokens: 1024,
@@ -256,11 +256,12 @@ export async function POST(req: NextRequest) {
       let batchErr: unknown = null;
       for (const model of models) {
         try {
-          const { object } = await generateObject({
+          const { object } = await generateObjectSafe({
             model,
-            // See lib/strictSchema.ts — Pollinations gets the
-            // strictified schema, every other provider the zod schema.
-            schema: schemaForModel(model, GameSchema),
+// The wrapper applies schemaForModel internally (see
+            // lib/strictSchema.ts) and salvages a truncated response
+            // instead of failing the attempt (lib/safeGenerate.ts).
+            zodSchema: GameSchema,
             system,
             prompt,
             maxTokens: 3072,

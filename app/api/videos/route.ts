@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
 import { z } from "zod";
 import {
   getModelsFor,
@@ -7,7 +6,7 @@ import {
   isRetryableProviderError,
   safeErrorDetail,
 } from "@/lib/gemini";
-import { schemaForModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 // The candidate shape lives in lib/routeSchemas.ts (moved there so the
 // strict-schema logic test can import the real definition).
 import { CandidateSchema } from "@/lib/routeSchemas";
@@ -175,11 +174,13 @@ async function suggestAndVerify(topic: string): Promise<VerifiedVideo[]> {
   let lastErr: unknown = null;
   for (const model of models) {
     try {
-      const { object } = await generateObject({
+      const { object } = await generateObjectSafe({
         model,
-        // Pollinations enforces strict JSON Schema (see
-        // lib/strictSchema.ts) — it gets the strictified schema.
-        schema: schemaForModel(model, CandidateSchema),
+        // The wrapper applies schemaForModel internally (Pollinations gets
+        // the strictified schema, others the zod schema unchanged) and
+        // salvages a truncated response instead of failing the attempt
+        // (see lib/safeGenerate.ts).
+        zodSchema: CandidateSchema,
         system: `You suggest YouTube videos that explain a study topic. Suggest 3 to 6 real, popular YouTube videos that explain the supplied topic well for a student. Return ONLY videos you are genuinely confident exist, with their exact 11-character video IDs — never guess an ID, never invent a video, never return a placeholder. If you are not confident about a video, leave it out. Prefer well-known educational channels.`,
         prompt: `Topic to find explainer videos for:\n\n${topic}`,
         maxTokens: 512,
@@ -268,11 +269,12 @@ async function suggestKhanVideos(
   let lastErr: unknown = null;
   for (const model of models) {
     try {
-      const { object } = await generateObject({
+      const { object } = await generateObjectSafe({
         model,
-        // See lib/strictSchema.ts — Pollinations gets the strictified
-        // schema, every other provider the zod schema unchanged.
-        schema: schemaForModel(model, CandidateSchema),
+        // The wrapper applies schemaForModel internally (see
+        // lib/strictSchema.ts) and salvages a truncated response
+        // instead of failing the attempt (lib/safeGenerate.ts).
+        zodSchema: CandidateSchema,
         system: `You suggest Khan Academy videos that explain a study topic. Suggest 3 to 6 real videos from the Khan Academy YouTube channel ONLY — videos published by Khan Academy itself, not by any other channel. Return ONLY videos you are genuinely confident exist on the Khan Academy channel, with their exact 11-character video IDs — never guess an ID, never invent a video, never return a placeholder. If you are not confident about a Khan Academy video, leave it out.`,
         prompt: `Topic to find Khan Academy explainer videos for:\n\n${topic}`,
         maxTokens: 512,

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
 import { z } from "zod";
 import {
   getModelsFor,
@@ -8,7 +7,7 @@ import {
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
-import { schemaForModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 // The grading shape lives in lib/routeSchemas.ts (moved there so the
 // strict-schema logic test can import the real definition).
 import { CheckReasoningSchema } from "@/lib/routeSchemas";
@@ -94,13 +93,14 @@ List pros (what was done well: correct steps, good method, clear working) and co
     let lastErr: unknown = null;
     for (const model of models) {
       try {
-        const { object } = await generateObject({
+        const { object } = await generateObjectSafe({
           model,
           // Pollinations is not in the vision chain, but every
-          // generateObject call goes through schemaForModel so a
-          // future provider addition cannot reintroduce the strict-
-          // schema rejection (see lib/strictSchema.ts).
-          schema: schemaForModel(model, CheckReasoningSchema),
+          // generateObject call goes through the wrapper, which applies
+          // schemaForModel internally — so a future provider addition
+          // cannot reintroduce the strict-schema rejection (see
+          // lib/safeGenerate.ts).
+          zodSchema: CheckReasoningSchema,
           system: systemPrompt,
           messages: [
             {

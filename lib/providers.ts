@@ -113,6 +113,20 @@ import type { LanguageModel } from "ai";
  *     treats it as retryable and moves on; the chain trying it
  *     during a real generation is the only way its POST path gets
  *     proven, so do not probe it directly with curl.
+ *     OUTPUT CAP 2026-11-27 (Vercel logs 02:46:51 CST): Pollinations
+ *     ACCEPTED the strictified schema and returned a nearly complete
+ *     guide, then stopped mid-string at JSON position 6064
+ *     (~1,500 output tokens, ~19s) — its own output cap and/or
+ *     per-request time limit; our side sends max_completion_tokens:
+ *     8192 and the 20s abort did not fire, so we are not the
+ *     limiter. Two consequences: (1) /api/generate asks Pollinations
+ *     for a COMPACT guide (~1,400 tokens: 3 modules × 2 concepts,
+ *     terse fields) instead of the full prompt, which it can never
+ *     finish; (2) every generateObject call goes through
+ *     generateObjectSafe (lib/safeGenerate.ts), which salvages a
+ *     truncated response into the guide it already wrote instead of
+ *     failing the attempt. Do not ask Pollinations for a full-size
+ *     guide again — it will truncate.
  * 12. GitHub Models — UNVERIFIED. Free with a GitHub token
  *     (GITHUB_TOKEN), model openai/gpt-4.1-mini (fast, vision-capable
  *     per its model card). The inference host IS alive (GET to the

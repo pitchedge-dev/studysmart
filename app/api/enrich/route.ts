@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
 import { z } from "zod";
 import {
   getLiteModels,
@@ -10,7 +9,7 @@ import {
 } from "@/lib/gemini";
 import { EnrichmentSchema, GenerateResultSchema } from "@/lib/guideSchema";
 import { sanitizeGuide } from "@/lib/guideQuality";
-import { schemaForModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 import {
   attemptTimeoutMs,
   ENRICH_ATTEMPT_MS,
@@ -90,11 +89,13 @@ export async function POST(req: NextRequest) {
       if (remainingMs(startedAt, ENRICH_WALL_CLOCK_MS) < MIN_REMAINING_MS)
         break;
       try {
-        const { object } = await generateObject({
+        const { object } = await generateObjectSafe({
           model: liteModel,
-          // Pollinations enforces strict JSON Schema — schemaForModel
-          // sends it the strictified schema, others unchanged.
-          schema: schemaForModel(liteModel, EnrichmentSchema),
+// The wrapper applies schemaForModel internally (Pollinations gets
+          // the strictified schema, others the zod schema unchanged) and
+          // salvages a truncated response instead of failing the attempt
+          // (see lib/safeGenerate.ts).
+          zodSchema: EnrichmentSchema,
           system: ENRICHMENT_PROMPT,
           messages: [{ role: "user", content }],
           maxTokens: 2048,

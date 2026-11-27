@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
 import {
   BuilderBotEditResultSchema,
   type GuideJson,
 } from "@/lib/guideSchema";
 import { diffGuideEdit, isAdditiveRequest, restoreRemovedContent } from "@/lib/builderBot";
 import { sanitizeGuide } from "@/lib/guideQuality";
-import { schemaForModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 import {
   getModelsFor,
   isOverloadedError,
@@ -132,11 +131,13 @@ Return the summary, the change list, and the complete updated guide.`;
     let lastErr: unknown = null;
     for (const model of models) {
       try {
-        const { object } = await generateObject({
+        const { object } = await generateObjectSafe({
           model,
-          // Pollinations enforces strict JSON Schema (see
-          // lib/strictSchema.ts) — it gets the strictified schema.
-          schema: schemaForModel(model, BuilderBotEditResultSchema),
+// The wrapper applies schemaForModel internally (Pollinations gets
+          // the strictified schema, others the zod schema unchanged) and
+          // salvages a truncated response instead of failing the attempt
+          // (see lib/safeGenerate.ts).
+          zodSchema: BuilderBotEditResultSchema,
           system,
           prompt,
           maxTokens: 8192,

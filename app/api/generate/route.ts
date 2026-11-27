@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject, type LanguageModel } from "ai";
+import { type LanguageModel } from "ai";
 import { z } from "zod";
 import {
   getModelsFor,
@@ -42,7 +42,8 @@ import {
 } from "@/lib/studyTime";
 import { parseGivenResources } from "@/lib/givenResources";
 import { qualityIssues, sanitizeGuide } from "@/lib/guideQuality";
-import { schemaForModel } from "@/lib/strictSchema";
+import { isPollinationsModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 // Simplified fallback shape lives in lib/routeSchemas.ts (moved there
 // so the strict-schema logic test can import the real definition —
 // Next.js route files may not export anything but route fields).
@@ -238,6 +239,35 @@ export async function POST(req: NextRequest) {
       ? `User-supplied material:\n\n${text}`
       : "User-supplied material: see the attached image(s) only.";
 
+    // Pollinations stops generating after about 1,500 output tokens
+    // (~19s — Vercel logs 2026-11-27 02:46:51 CST: a full guide was
+    // cut off mid-string at JSON position 6064). The full prompt
+    // above asks for a 2,500–4,000-token guide, so Pollinations can
+    // NEVER return one whole. For Pollinations only, the same schema
+    // is requested with a compact prompt: exactly 3 modules × 2
+    // concepts, one short-answer practice problem per concept,
+    // one-sentence explanations, two-step worked examples, a short
+    // studyGuide and at most 2 quiz questions — roughly 1,400 tokens,
+    // which fits the observed budget while still meeting the depth
+    // floor (3 modules, 6 concepts). Every field the schema asks for
+    // is still emitted, with short values — the strict schema
+    // requires every key present, so fields are shortened, never
+    // omitted. Other providers keep the full prompt unchanged. If the
+    // compact attempt still truncates, generateObjectSafe salvages
+    // the partial guide (see lib/safeGenerate.ts).
+    const COMPACT_POLLINATIONS_INSTRUCTION = `IMPORTANT — COMPACT OUTPUT (this attempt only): this provider stops generating after about 1,500 tokens, so the ENTIRE guide must fit in roughly 1,400 tokens. The compact rules below OVERRIDE the length and depth rules above for this attempt only — follow them exactly, and keep every field real and correct, never filler, never a placeholder:
+- Exactly 3 modules with exactly 2 concepts each (6 concepts total).
+- One practice problem per concept, and make it SHORT-ANSWER (no options, no whyWrong): a question, a correct answer, and a one-sentence explanation.
+- Every explanation is exactly ONE short sentence. Every worked example has exactly 2 short steps. Every definition, common mistake, and memory tip is one short sentence.
+- studyGuide Markdown under 300 characters. At most 8 key terms, each with a one-line definition.
+- At most 2 quiz questions, with short options; keep one short whyWrong entry per wrong option.
+- Emit every field the schema asks for, with short values — never omit a field.`;
+    const compactSystemPrompt = `${systemPrompt}\n\n${COMPACT_POLLINATIONS_INSTRUCTION}`;
+    /** The system prompt for one model: compact for Pollinations
+     *  (see above), full for every other provider. */
+    const systemPromptFor = (model: LanguageModel): string =>
+      isPollinationsModel(model) ? compactSystemPrompt : systemPrompt;
+
     const content: Array<
       | { type: "text"; text: string }
       | { type: "image"; image: string }
@@ -318,13 +348,12 @@ export async function POST(req: NextRequest) {
         )
           return null;
         try {
-          const { object } = await generateObject({
+          // Truncated output is salvaged by the wrapper (see
+          // lib/safeGenerate.ts): a model that stops mid-JSON still
+          // returns the guide it already wrote, minus the tail.
+          const { object } = await generateObjectSafe({
             model,
-            // Pollinations enforces strict JSON Schema (required must
-            // list every property key) — schemaForModel sends it the
-            // strictified schema and every other provider the zod
-            // schema unchanged (see lib/strictSchema.ts).
-            schema: schemaForModel(model, SimpleGenerateResultSchema),
+            zodSchema: SimpleGenerateResultSchema,
             system: simplePrompt,
             messages: [{ role: "user", content }],
             maxTokens: 3072,
@@ -361,12 +390,14 @@ export async function POST(req: NextRequest) {
         const fullCapMs =
           i === 0 ? GENERATE_FIRST_ATTEMPT_MS : GENERATE_FULL_ATTEMPT_MS;
         try {
-          const { object } = await generateObject({
+          // Pollinations gets the compact prompt (see above): a full
+          // prompt asks for more tokens than it will ever emit. The
+          // wrapper salvages a truncated response instead of failing
+          // the attempt (see lib/safeGenerate.ts).
+          const { object } = await generateObjectSafe({
             model,
-            // See lib/strictSchema.ts — Pollinations gets the
-            // strictified schema, every other provider the zod schema.
-            schema: schemaForModel(model, GenerateResultSchema),
-            system: systemPrompt,
+            zodSchema: GenerateResultSchema,
+            system: systemPromptFor(model),
             messages: [{ role: "user", content }],
             maxTokens: 8192,
             maxRetries: 0,
@@ -452,11 +483,11 @@ export async function POST(req: NextRequest) {
       // guide is not "repaired" into a long one.
       const minModules = repairMinModules(hours);
       const problems = [...missing, ...quality].join("; ");
-      const repairPrompt = `${systemPrompt} IMPORTANT — REPAIR: a previous attempt at this guide came back with these problems: ${problems}. Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Every concept needs a workedExample with a REAL NUMERIC CALCULATION: the problem states real numbers from the topic, at least one step shows the arithmetic written out (for example 2,000 × 60 = 120,000), and the answer is the computed result with its unit. A time range, a vague count, or the word 'Calculate' with no numbers does NOT count. Every multiple-choice question needs one whyWrong entry for EACH wrong option. Keep the same depth and quality standard as a normal generation.`;
+      const repairPrompt = `${systemPromptFor(modelUsed)} IMPORTANT — REPAIR: a previous attempt at this guide came back with these problems: ${problems}. Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Every concept needs a workedExample with a REAL NUMERIC CALCULATION: the problem states real numbers from the topic, at least one step shows the arithmetic written out (for example 2,000 × 60 = 120,000), and the answer is the computed result with its unit. A time range, a vague count, or the word 'Calculate' with no numbers does NOT count. Every multiple-choice question needs one whyWrong entry for EACH wrong option. Keep the same depth and quality standard as a normal generation.`;
       try {
-        const { object } = await generateObject({
+        const { object } = await generateObjectSafe({
           model: modelUsed,
-          schema: schemaForModel(modelUsed, GenerateResultSchema),
+          zodSchema: GenerateResultSchema,
           system: repairPrompt,
           messages: [{ role: "user", content }],
           maxTokens: 8192,

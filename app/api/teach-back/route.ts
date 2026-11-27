@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateObject } from "ai";
 import { z } from "zod";
 import {
   getModelsFor,
@@ -7,7 +6,7 @@ import {
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
-import { schemaForModel } from "@/lib/strictSchema";
+import { generateObjectSafe } from "@/lib/safeGenerate";
 // The grading shape lives in lib/routeSchemas.ts (moved there so the
 // strict-schema logic test can import the real definition).
 import { TeachBackSchema } from "@/lib/routeSchemas";
@@ -80,11 +79,13 @@ export async function POST(req: NextRequest) {
     let lastErr: unknown = null;
     for (const model of models) {
       try {
-        const { object } = await generateObject({
+        const { object } = await generateObjectSafe({
           model,
-          // Pollinations enforces strict JSON Schema (see
-          // lib/strictSchema.ts) — it gets the strictified schema.
-          schema: schemaForModel(model, TeachBackSchema),
+// The wrapper applies schemaForModel internally (Pollinations gets
+          // the strictified schema, others the zod schema unchanged) and
+          // salvages a truncated response instead of failing the attempt
+          // (see lib/safeGenerate.ts).
+          zodSchema: TeachBackSchema,
           system: `You are StudySMART's teach-back grader. A student just tried to explain a concept from memory, as if teaching a beginner, with their notes closed. Grade ONLY against the source material from their own study guide below — never invent facts, and never mark the student down for missing something that is not in the source material. Score generously but honestly: 9-10 means every key point covered in plain words with nothing wrong; 7-8 means the core idea is right with a small gap; 4-6 means partly right with real gaps; 0-3 means the explanation is mostly wrong or empty. Name misconceptions plainly when the student said something incorrect. Keep every list short and every sentence plain.${levelHint}`,
           prompt: `Concept: "${conceptTitle.trim()}"\n\n${sourceMaterial}\n\nThe student's explanation (written from memory):\n"${studentExplanation.trim()}"`,
           maxTokens: 2048,
