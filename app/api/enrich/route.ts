@@ -10,6 +10,7 @@ import {
 } from "@/lib/gemini";
 import { EnrichmentSchema, GenerateResultSchema } from "@/lib/guideSchema";
 import { sanitizeGuide } from "@/lib/guideQuality";
+import { schemaForModel } from "@/lib/strictSchema";
 import {
   attemptTimeoutMs,
   ENRICH_ATTEMPT_MS,
@@ -91,7 +92,9 @@ export async function POST(req: NextRequest) {
       try {
         const { object } = await generateObject({
           model: liteModel,
-          schema: EnrichmentSchema,
+          // Pollinations enforces strict JSON Schema — schemaForModel
+          // sends it the strictified schema, others unchanged.
+          schema: schemaForModel(liteModel, EnrichmentSchema),
           system: ENRICHMENT_PROMPT,
           messages: [{ role: "user", content }],
           maxTokens: 2048,

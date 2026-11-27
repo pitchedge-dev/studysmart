@@ -8,46 +8,13 @@ import {
   MISSING_KEY_MESSAGE,
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
+import { schemaForModel } from "@/lib/strictSchema";
+// The grading shape lives in lib/routeSchemas.ts (moved there so the
+// strict-schema logic test can import the real definition).
+import { CheckReasoningSchema } from "@/lib/routeSchemas";
 
 export const maxDuration = 60;
 
-const CheckReasoningSchema = z.object({
-  readable: z
-    .boolean()
-    .describe(
-      "Whether the handwriting in the image can actually be read. False when it is blank, too faint, too messy, or cropped — never guess at unreadable writing."
-    ),
-  transcription: z
-    .string()
-    .describe(
-      "Exactly what the student wrote, transcribed from the handwriting. Empty when it cannot be read."
-    ),
-  score: z
-    .number()
-    .int()
-    .min(0)
-    .max(10)
-    .describe(
-      "Score out of 10 for the reasoning as a whole. About half the marks are for the WORK — is the final answer/result correct? About half are for the PROCESS — are the steps logical, in the right order, complete, with the working shown? 9–10 means fully correct work and process; 5–8 means partly right; 0–4 means mostly wrong or missing. 0 when the handwriting cannot be read."
-    ),
-  pros: z
-    .array(z.string())
-    .max(5)
-    .describe(
-      "What the student did well — correct steps, good method, clear working, correct final answer. Empty when nothing was done well or the writing cannot be read."
-    ),
-  cons: z
-    .array(z.string())
-    .max(5)
-    .describe(
-      "What was wrong or missing — skipped steps, wrong method, unclear working, arithmetic slip, wrong final answer. When the handwriting cannot be read, a single item saying so."
-    ),
-  hint: z
-    .string()
-    .describe(
-      "One concrete hint for the student's next try — what to fix or show next time. When the handwriting cannot be read, advice to write bigger and clearer."
-    ),
-});
 
 /**
  * POST /api/check-reasoning
@@ -129,7 +96,11 @@ List pros (what was done well: correct steps, good method, clear working) and co
       try {
         const { object } = await generateObject({
           model,
-          schema: CheckReasoningSchema,
+          // Pollinations is not in the vision chain, but every
+          // generateObject call goes through schemaForModel so a
+          // future provider addition cannot reintroduce the strict-
+          // schema rejection (see lib/strictSchema.ts).
+          schema: schemaForModel(model, CheckReasoningSchema),
           system: systemPrompt,
           messages: [
             {

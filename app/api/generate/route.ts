@@ -33,13 +33,7 @@ export const maxDuration = 60;
 // of failing the whole generation with a 500.
 // ---------------------------------------------------------------------------
 
-import {
-  CheckpointSchema,
-  ConceptSchema,
-  GenerateResultSchema,
-  PracticeGroupSchema,
-  QuizQuestionSchema,
-} from "@/lib/guideSchema";
+import { GenerateResultSchema } from "@/lib/guideSchema";
 import {
   depthFloor,
   isValidStudyHours,
@@ -48,33 +42,11 @@ import {
 } from "@/lib/studyTime";
 import { parseGivenResources } from "@/lib/givenResources";
 import { qualityIssues, sanitizeGuide } from "@/lib/guideQuality";
-
-// Simplified fallback shape, used once if the full shape fails to validate:
-// concepts + targeted practice only, no checkpoint / reasoning / core ideas.
-// It still returns a real, complete guide — never mock content.
-const SimpleModuleSchema = z.object({
-  moduleNumber: z.number(),
-  title: z.string(),
-  intro: z.string(),
-  format: z.string().optional(),
-  concepts: z.array(ConceptSchema).min(1).max(4),
-  practice: z.array(PracticeGroupSchema),
-});
-
-const SimpleGenerateResultSchema = z.object({
-  topicType: z.string(),
-  guideTitle: z.string(),
-  studyGuide: z.string(),
-  summary: z.string().optional(),
-  keyTerms: z
-    .array(z.object({ term: z.string(), definition: z.string() }))
-    .max(12)
-    .optional(),
-  keyConcepts: z.array(z.string()),
-  languageCode: z.string().optional(),
-  modules: z.array(SimpleModuleSchema).min(1).max(3),
-  quiz: z.array(QuizQuestionSchema).max(6).optional(),
-});
+import { schemaForModel } from "@/lib/strictSchema";
+// Simplified fallback shape lives in lib/routeSchemas.ts (moved there
+// so the strict-schema logic test can import the real definition —
+// Next.js route files may not export anything but route fields).
+import { SimpleGenerateResultSchema } from "@/lib/routeSchemas";
 
 const EDUCATION_LEVELS = [
   "Elementary School",
@@ -348,7 +320,11 @@ export async function POST(req: NextRequest) {
         try {
           const { object } = await generateObject({
             model,
-            schema: SimpleGenerateResultSchema,
+            // Pollinations enforces strict JSON Schema (required must
+            // list every property key) — schemaForModel sends it the
+            // strictified schema and every other provider the zod
+            // schema unchanged (see lib/strictSchema.ts).
+            schema: schemaForModel(model, SimpleGenerateResultSchema),
             system: simplePrompt,
             messages: [{ role: "user", content }],
             maxTokens: 3072,
@@ -387,7 +363,9 @@ export async function POST(req: NextRequest) {
         try {
           const { object } = await generateObject({
             model,
-            schema: GenerateResultSchema,
+            // See lib/strictSchema.ts — Pollinations gets the
+            // strictified schema, every other provider the zod schema.
+            schema: schemaForModel(model, GenerateResultSchema),
             system: systemPrompt,
             messages: [{ role: "user", content }],
             maxTokens: 8192,
@@ -478,7 +456,7 @@ export async function POST(req: NextRequest) {
       try {
         const { object } = await generateObject({
           model: modelUsed,
-          schema: GenerateResultSchema,
+          schema: schemaForModel(modelUsed, GenerateResultSchema),
           system: repairPrompt,
           messages: [{ role: "user", content }],
           maxTokens: 8192,

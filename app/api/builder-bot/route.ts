@@ -6,6 +6,7 @@ import {
 } from "@/lib/guideSchema";
 import { diffGuideEdit, isAdditiveRequest, restoreRemovedContent } from "@/lib/builderBot";
 import { sanitizeGuide } from "@/lib/guideQuality";
+import { schemaForModel } from "@/lib/strictSchema";
 import {
   getModelsFor,
   isOverloadedError,
@@ -133,7 +134,9 @@ Return the summary, the change list, and the complete updated guide.`;
       try {
         const { object } = await generateObject({
           model,
-          schema: BuilderBotEditResultSchema,
+          // Pollinations enforces strict JSON Schema (see
+          // lib/strictSchema.ts) — it gets the strictified schema.
+          schema: schemaForModel(model, BuilderBotEditResultSchema),
           system,
           prompt,
           maxTokens: 8192,

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { WhyWrongSchema } from "@/lib/guideSchema";
+import { schemaForModel } from "@/lib/strictSchema";
+// The practice shape lives in lib/routeSchemas.ts (moved there so the
+// strict-schema logic test can import the real definition).
+import { PersonalizedPracticeSchema } from "@/lib/routeSchemas";
 import {
   getModelsFor,
   isOverloadedError,
@@ -26,40 +29,6 @@ const WeakConceptSchema = z.object({
     .optional(),
 });
 
-const PersonalizedQuestionSchema = z.object({
-  conceptTitle: z
-    .string()
-    .describe("The weak concept this question practices — must match one of the supplied weak concepts."),
-  question: z.string().describe("A fresh practice question on the weak concept. Do not reuse the question the student already missed."),
-  options: z
-    .array(z.string())
-    .min(3)
-    .max(4)
-    .describe("Three or four answer options (four preferred)."),
-  correctAnswer: z
-    .string()
-    .describe("The exact text of the correct option, matching one of the options."),
-  explanation: z
-    .string()
-    .describe("A short explanation of why the correct answer is right — and, where the student picked a wrong answer before, why that wrong answer is wrong."),
-  whyWrong: z
-    .array(WhyWrongSchema)
-    .optional()
-    .describe(
-      "One entry for EACH wrong option, saying why that option is wrong — drawn from the common mistakes on this concept. Never explain only the correct answer."
-    ),
-  difficulty: z
-    .enum(["Recall", "Apply", "Analyse"])
-    .describe("Bloom's level this question targets: Recall (remember/understand the idea), Apply (use it in a new situation), or Analyse (compare, explain why, break it apart). Match it to the concept's mastery — Recall for Attempted/Familiar, Apply for Proficient, Analyse for Mastered."),
-});
-
-const PersonalizedPracticeSchema = z.object({
-  questions: z
-    .array(PersonalizedQuestionSchema)
-    .min(1)
-    .max(6)
-    .describe("Fresh targeted practice questions for the student's weak concepts — two per weak concept, up to six total."),
-});
 
 /**
  * POST /api/personalized-practice
@@ -139,7 +108,9 @@ export async function POST(req: NextRequest) {
       try {
         const { object } = await generateObject({
           model,
-          schema: PersonalizedPracticeSchema,
+          // Pollinations enforces strict JSON Schema (see
+          // lib/strictSchema.ts) — it gets the strictified schema.
+          schema: schemaForModel(model, PersonalizedPracticeSchema),
           system: `You are StudySMART's personalized practice tutor. ${titleHint}${levelHint}The student got these concepts wrong on their own copy of this study guide — build fresh practice that targets exactly those weak spots. Write NEW questions (never reuse the question they already missed), two per weak concept, up to six total. Make the questions directly test the misunderstanding shown by their wrong answer, and explain in each answer why the right answer is right and why their previous wrong answer was wrong. For EVERY question, add one whyWrong entry for EACH wrong option, saying why that option is wrong — never explain only the correct answer. Match each question's difficulty to the mastery note on its concept (Recall / Apply / Analyse) and tag it with that difficulty. Keep every question and explanation short and at the right level. Do not invent topics beyond these concepts.`,
           prompt: `The student's weak concepts:\n\n${weakText}`,
           maxTokens: 4096,

@@ -954,12 +954,19 @@ function createPollinationsProvider() {
   // SDK requires a non-empty apiKey, so a placeholder is sent; the
   // service ignores it. Verified live 2026-11-25 (GET: exact reply,
   // HTTP 200, ~1.3s; JSON mode verified). Its OpenAI-compatible POST
-  // endpoint could not be live-tested from this environment (approval
-  // timeout) — a failure there is retryable and Pollinations sits
-  // SECOND in every text chain, so the worst case is a fast failure
-  // and the chain moves on; the chain trying it during a real
-  // generation is the only way its POST path gets proven, so do not
-  // probe it directly with curl.
+  // endpoint was PROVEN live 2026-11-26 22:57:39 CST — it answered in
+  // 0.4s, but REJECTED the guide schema: Pollinations enforces strict
+  // JSON Schema (required must list every property key) and our zod
+  // schemas use .optional() liberally, so 'workedExample' was missing
+  // from required. That is fixed in lib/strictSchema.ts: every
+  // generateObject call goes through schemaForModel(), which sends
+  // Pollinations a strictified copy of the schema (same zod
+  // validation on the response) and every other provider the zod
+  // schema unchanged. Pollinations sits SECOND in every text chain,
+  // so the worst case for a failure there is a fast failure and the
+  // chain moves on; the chain trying it during a real generation is
+  // the only way its POST path gets proven, so do not probe it
+  // directly with curl.
   return createOpenAI({
     apiKey: "pollinations-no-key",
     baseURL: "https://text.pollinations.ai/openai",

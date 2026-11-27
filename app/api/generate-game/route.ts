@@ -9,97 +9,17 @@ import {
   OVERLOADED_MESSAGE,
 } from "@/lib/gemini";
 import { cleanQuestions, repairQuestion } from "@/lib/arenaQuestions";
+import { schemaForModel } from "@/lib/strictSchema";
+// Game/template shapes live in lib/routeSchemas.ts (moved there so the
+// strict-schema logic test can import the real definitions — Next.js
+// route files may not export anything but route fields).
+import {
+  GameQuestionSchema,
+  GameSchema,
+  TemplatesSchema,
+} from "@/lib/routeSchemas";
 
 export const maxDuration = 60;
-
-const GameQuestionSchema = z.object({
-  question: z.string().describe("The trivia question text."),
-  options: z
-    .array(z.string())
-    .length(4)
-    .describe("Exactly four answer options."),
-  correctAnswer: z
-    .string()
-    .describe("The exact text of the correct option, matching one of the options."),
-  explanation: z
-    .string()
-    .describe("A short explanation of the correct answer."),
-  points: z
-    .number()
-    .int()
-    .describe("Points awarded for a correct answer (100-500 based on difficulty)."),
-});
-
-const GameCardSchema = z.object({
-  front: z.string().describe("The front of a flashcard or matching card, taken from the supplied material."),
-  back: z.string().describe("The back of the card — the match for the front, taken from the supplied material."),
-});
-
-const GameSchema = z.object({
-  title: z.string().describe("A short, engaging title for this game, derived from the supplied topic/notes."),
-  gameType: z
-    .string()
-    .describe(
-      "The game type chosen for this topic, derived from the supplied material: for example a timed speed drill, a matching game, flashcards, or a quiz race. Choose the type that fits the topic."
-    ),
-  gameDescription: z
-    .string()
-    .describe("One line describing how this game is played, derived from the supplied material."),
-  timedSecondsPerQuestion: z
-    .number()
-    .int()
-    .optional()
-    .describe("Seconds allowed per question, only when the chosen game type is timed. Omit otherwise."),
-  cards: z
-    .array(GameCardSchema)
-    .optional()
-    .describe(
-      "Front/back cards for matching or flashcard games, taken from the supplied material. Include only when the chosen game type uses cards."
-    ),
-  questions: z.array(GameQuestionSchema).describe("The game questions."),
-});
-
-/**
- * Step 1 of the two-step Arena flow: fast, INCOMPLETE template previews.
- * Three different game ideas for the topic — just a title, a game type, a
- * one-line description, and 1–2 sample questions as a taste. The user picks
- * one, and only then does the AI build the full game. Everything is
- * generated on demand from the user's topic; nothing is premade.
- */
-const TemplateSampleQuestionSchema = z.object({
-  question: z.string().describe("A sample question for this game idea, from the supplied material."),
-  options: z
-    .array(z.string())
-    .length(4)
-    .describe("Exactly four answer options for the sample question."),
-  correctAnswer: z
-    .string()
-    .describe("The exact text of the correct option, matching one of the options."),
-});
-
-const GameTemplateSchema = z.object({
-  title: z.string().describe("A short, engaging name for this game idea, derived from the supplied topic/notes."),
-  gameType: z
-    .string()
-    .describe(
-      "The game type for this idea — for example trivia race, flashcards, matching, quiz showdown, or timed speed drill. Pick a type that fits the topic."
-    ),
-  description: z
-    .string()
-    .describe("One line describing how this game is played."),
-  sampleQuestions: z
-    .array(TemplateSampleQuestionSchema)
-    .min(1)
-    .max(2)
-    .describe("One or two sample questions as a taste of this game idea — no more."),
-});
-
-const TemplatesSchema = z.object({
-  templates: z
-    .array(GameTemplateSchema)
-    .length(3)
-    .describe("Exactly three different game ideas for the supplied topic, each a different game type where possible."),
-});
 
 const ChosenTemplateSchema = z.object({
   title: z.string(),
@@ -253,7 +173,9 @@ export async function POST(req: NextRequest) {
         try {
           const { object } = await generateObject({
             model,
-            schema: TemplatesSchema,
+            // Pollinations enforces strict JSON Schema (see
+            // lib/strictSchema.ts) — it gets the strictified schema.
+            schema: schemaForModel(model, TemplatesSchema),
             system: `You are StudySMART's Battle Arena game designer. ${topicHint}${optionGuidance ? `${optionGuidance} ` : ""}Dream up exactly 3 DIFFERENT game ideas for the supplied topic or notes — make the game types different from each other where the topic allows (for example trivia race, flashcards, matching, quiz showdown, timed speed drill). These are INCOMPLETE previews, not full games: for each idea give only a short title, the game type, one line describing how it plays, and 1–2 sample questions with four options and the correct answer, all taken strictly from the supplied material. Do not invent facts beyond what the supplied material supports, and do not add topics of your own. Keep every description to one short line.`,
             prompt: `Topic / notes to dream up game ideas from:\n\n${topicOrNotes}`,
             maxTokens: 1024,
@@ -336,7 +258,9 @@ export async function POST(req: NextRequest) {
         try {
           const { object } = await generateObject({
             model,
-            schema: GameSchema,
+            // See lib/strictSchema.ts — Pollinations gets the
+            // strictified schema, every other provider the zod schema.
+            schema: schemaForModel(model, GameSchema),
             system,
             prompt,
             maxTokens: 3072,
