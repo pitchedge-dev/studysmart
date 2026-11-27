@@ -219,11 +219,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Long structured guides route to the guide category: Gemini first
-    // (proven structured output here), then the live providers in
-    // priority order (DeepSeek, Cohere, Pollinations, GitHub Models),
-    // then the billing-dead ones, then the no-key providers — and
-    // resolveSpecs interleaves them round-robin by provider, so one
-    // provider's outage cannot eat the wall (see lib/providers.ts).
+    // (proven structured output here), then the no-key safety net
+    // Pollinations SECOND, Cohere, GitHub Models, then the
+    // billing-dead ones (Moonshot, AIML, SambaNova, DeepSeek), then
+    // the no-key providers — and resolveSpecs interleaves them
+    // round-robin by provider, so one provider's outage cannot eat
+    // the wall (see lib/providers.ts).
     const models = getModelsFor("guides");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
@@ -323,17 +324,20 @@ export async function POST(req: NextRequest) {
       // cap could not succeed even on a healthy provider, 2026-11-26
       // 12:33). The loop now breaks only under 2s remaining.
       //
-      // When a full-shape attempt TIMES OUT, the same model gets one
-      // try at the SIMPLIFIED shape with the remaining time before
-      // the chain moves on: a timeout means the provider was slow,
-      // not wrong, and a smaller shape may still land in time. A
-      // thin guide that lands beats a 503, and the depth floor +
-      // repair path below already exist for thin guides. Other
-      // retryable errors (overload, billing, 4xx, bad JSON) skip the
-      // simplified try — a smaller shape on a broken provider does
-      // not help — and the chain moves to the next model. A
-      // non-retryable error keeps the old behaviour: one simplified
-      // try on the same model, then move on.
+      // When a full-shape attempt TIMES OUT, the chain moves straight
+      // to the next model — NO simplified retry on the same model.
+      // A timeout means the provider is hanging, not just slow: the
+      // 2026-11-26 16:52 outage proved a simplified retry on the
+      // same hanging model burns ~15s and times out again, and the
+      // wall's scarcest resource is time. The simplified retry is
+      // kept only for NON-timeout failures below (non-retryable
+      // errors, where the model answered but the shape was wrong) —
+      // a smaller shape on a model that answered may still land.
+      // Other retryable errors (overload, billing, 4xx, bad JSON)
+      // skip the simplified try too — a smaller shape on a broken
+      // provider does not help — and the chain moves to the next
+      // model. A non-retryable error keeps the old behaviour: one
+      // simplified try on the same model, then move on.
       const trySimplified = async (
         model: LanguageModel
       ): Promise<z.infer<typeof GenerateResultSchema> | null> => {
@@ -404,11 +408,9 @@ export async function POST(req: NextRequest) {
             fullErr
           );
           if (isTimeoutError(fullErr)) {
-            // Slow, not wrong: one simplified try on the same model
-            // with the remaining time, then move on either way.
-            const simpleCore = await trySimplified(model);
-            if (simpleCore)
-              return { core: simpleCore, modelUsed: model, lastErr };
+            // Hanging, not just slow: a simplified retry on this
+            // model burned ~15s and timed out again in the 16:52
+            // outage, so move straight to the next provider.
             continue;
           }
           if (isRetryableProviderError(fullErr)) continue;

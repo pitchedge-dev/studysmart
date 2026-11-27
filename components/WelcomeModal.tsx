@@ -16,10 +16,11 @@ import MeetYourBots from "./MeetYourBots";
  * Google Gemini answers first, and Groq, OpenRouter, Cerebras, NVIDIA,
  * SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API,
  * Hugging Face, Moonshot, Zhipu and Qwen are wired in as free backup
- * providers, plus Pollinations — which needs no key at all and sits in
- * the chain as a safety net — so if one is busy or out of free calls
- * another one takes over. (Which of them actually have keys set is an
- * env-var matter — the popup claims the wiring, not the keys.)
+ * providers, plus Pollinations — which needs no key at all and is
+ * tried early in the chain as a safety net — so if one is busy or
+ * out of free calls another one takes over. (Which of them actually
+ * have keys set is an env-var matter — the popup claims the wiring,
+ * not the keys.)
  * (Vercel AI Gateway was removed 2026-11-26: it needs a card on file.)
  */
 
@@ -120,7 +121,7 @@ export default function WelcomeModal({
               DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face,
               Moonshot, Zhipu and Qwen are wired in as free backup
               providers, plus Pollinations — which needs no key at all and
-              sits in the chain as a safety net. If one is busy or out
+              is tried early in the chain as a safety net. If one is busy or out
               of free calls, another takes over automatically.
             </p>
           </div>

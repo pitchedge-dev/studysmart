@@ -37,12 +37,18 @@
  * FEWER, LONGER attempts: the first attempt keeps its 25s cap, and
  * every later attempt now gets 20s — enough for a full-shape guide
  * from a healthy provider. 25s + 20s = 45s leaves 5s for a last try
- * inside the 50s wall. And when a full-shape attempt times out, the
- * route now tries the SIMPLIFIED shape on the SAME model with the
- * remaining time before moving on (see app/api/generate/route.ts):
- * a slow-but-healthy provider may still land a thin guide, and the
- * depth floor + repair path already exist for thin guides. A thin
- * guide that lands beats a 503.
+ * inside the 50s wall.
+ *
+ * The 2026-11-26 16:52 lesson (Vercel logs, one POST /api/generate,
+ * 50.4s, 503): when a full-shape attempt times out, the route used
+ * to try the SIMPLIFIED shape on the SAME model — but a timeout
+ * means the provider is hanging, not just slow, and the retry burned
+ * ~15s timing out again on the same model. So a timeout now moves
+ * the chain straight to the next provider with no same-model retry.
+ * The simplified retry survives only for NON-timeout failures
+ * (non-retryable errors, where the model answered but the shape was
+ * wrong) — see app/api/generate/route.ts. A thin guide that lands
+ * beats a 503, but only when the model is actually answering.
  */
 
 /** /api/generate (core guide only) must answer inside this. */
