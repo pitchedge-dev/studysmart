@@ -263,17 +263,41 @@ export async function POST(req: NextRequest) {
     // sections arrive afterwards. A thin real guide beats a 503,
     // and if the compact attempt still truncates,
     // generateObjectSafe salvages the partial guide (see
-    // lib/safeGenerate.ts). Every field the schema asks for is
-    // still emitted, with short values — the strict schema requires
-    // every key present, so fields are shortened, never omitted.
+    // lib/safeGenerate.ts).
+    //
+    // SCHEMA-MINIMUM ALIGNMENT (Vercel logs 2026-11-27 13:06:12
+    // CST): the 2×2 compact prompt as first written asked for LESS
+    // than the schema's minimums, so the model complied with the
+    // prompt and failed the schema — a complete 6,469-char guide
+    // came back with modules[0].format missing (a required string
+    // the compact bullets never restated), a checkpoint with 2
+    // questions (the schema needs at least 5), and a practice
+    // problem with 2 options (the schema needs at least 3 when
+    // options are present). The compact instruction below now
+    // states every schema minimum explicitly: format is required
+    // on every module (one of the four values); the checkpoint is
+    // OMITTED in this attempt, because 5 questions do not fit the
+    // token budget (it is optional in the schema, so omitting it
+    // is valid — including a short one is not); practice problems
+    // carry no options array, and any options anywhere must number
+    // exactly 3 or 4, never 1 or 2; the quiz question, when
+    // included, has exactly 3 options. Core ideas and the reasoning
+    // example are omitted too (both optional) to keep the shape
+    // minimal and deterministic. The salvage net still repairs a
+    // model that slips (see lib/salvageJson.ts repairValue), but
+    // the prompt no longer asks for the impossible. Every field
+    // the schema REQUIRES is still emitted, with short values —
+    // required fields are shortened, never omitted.
     // Other providers keep the full prompt unchanged.
     const COMPACT_POLLINATIONS_INSTRUCTION = `IMPORTANT — COMPACT OUTPUT (this attempt only): this provider stops generating after about 1,500 tokens, so the ENTIRE guide must fit in roughly 1,000 tokens — write TIGHT, well under the limit, not near it. The compact rules below OVERRIDE the length and depth rules above for this attempt only — follow them exactly, and keep every field real and correct, never filler, never a placeholder:
 - Exactly 2 modules with exactly 2 concepts each (4 concepts total).
-- One practice problem per concept, and make it SHORT-ANSWER (no options, no whyWrong): a question, a correct answer, and a one-sentence explanation.
+- Every module MUST include a format field: one of "rules", "vocabulary", "core-ideas", or "mixed" — pick the one that fits the module's material. Never leave format out.
+- Do NOT include a checkpoint, coreIdeas, or a reasoningExample in this attempt: a checkpoint requires at least 5 questions, which does not fit the token budget — omit it entirely. Concepts + practice carry the module.
+- One practice problem per concept, and make it SHORT-ANSWER (no options, no whyWrong): a question, a correct answer, and a one-sentence explanation. Never put an options array on a practice problem in this attempt — if a problem genuinely needs options, it must have exactly 3 or 4, never 1 or 2.
+- At most 1 quiz question, with exactly 3 short options, a correctAnswer matching one of them, and a one-sentence explanation; omit whyWrong for this attempt.
 - Every explanation is exactly ONE short sentence (under 25 words). Every worked example has exactly 2 SHORT steps (each under 10 words) and a short answer. Every definition, common mistake, and memory tip is one short sentence (under 20 words).
 - studyGuide Markdown under 200 characters. At most 6 key terms, each with a one-line definition. At most 6 key concepts.
-- At most 1 quiz question, with short options; omit whyWrong for this attempt.
-- Emit every field the schema asks for, with short values — never omit a field.`;
+- Emit every REQUIRED field the schema asks for, with short values — never omit a required field. The only fields you may omit in this attempt are the checkpoint, coreIdeas, reasoningExample, and whyWrong (all optional).`;
     const compactSystemPrompt = `${systemPrompt}\n\n${COMPACT_POLLINATIONS_INSTRUCTION}`;
     /** The system prompt for one model: compact for Pollinations
      *  (see above), full for every other provider. */

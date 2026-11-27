@@ -36,12 +36,16 @@ import { schemaForModel } from "./strictSchema";
  *     salvaged object is returned — the student gets the guide the
  *     model already wrote, minus its incomplete tail, instead of a
  *     503. When the strict validation fails, a second PARTIAL pass
- *     fills missing top-level fields with honest empty defaults
- *     (empty strings / arrays — never invented content) and drops
- *     incomplete array items, so a partial whose required scalar
- *     fields trail the truncation point still validates and is
- *     returned. The route's own checks (sanitizeGuide, missingParts,
- *     the repair pass) then judge the salvaged guide exactly as they
+ *     repairs the value recursively (drops only the malformed nested
+ *     pieces — an under-filled checkpoint, a 2-option options array —
+ *     fills missing metadata with honest empty defaults, and keeps
+ *     the valid modules), so a COMPLETE response that failed on
+ *     nested rules still lands a usable guide (live 2026-11-27
+ *     13:06: Pollinations returned a complete guide that failed on
+ *     modules[0].format, a 2-question checkpoint, and 2-option
+ *     practice — the old whole-module filter threw it all away).
+ *     The route's own checks (sanitizeGuide, missingParts, the
+ *     repair pass) then judge the salvaged guide exactly as they
  *     would a complete one, so a thin salvaged guide still gets its
  *     repair attempt.
  *  3. When the text cannot be salvaged into a valid object, the
@@ -123,8 +127,12 @@ export async function generateObjectSafe<T>(
             diagnostics.filledFields.length > 0
               ? `, filled with empty defaults: ${diagnostics.filledFields.join(", ")}`
               : "";
+          const dropped =
+            diagnostics.droppedPaths.length > 0
+              ? `, dropped: ${diagnostics.droppedPaths.join(", ")}`
+              : "";
           console.error(
-            `[safeGenerate] salvaged truncated output from ${modelLabel(model)} (${err.text.length} chars received, ${diagnostics.mode} salvage${kept}${filled})`
+            `[safeGenerate] salvaged output from ${modelLabel(model)} (${err.text.length} chars received, ${diagnostics.mode} salvage${kept}${filled}${dropped})`
           );
           return { object: salvaged };
         }
@@ -133,8 +141,8 @@ export async function generateObjectSafe<T>(
         // net's failure from the Vercel logs (that is exactly what
         // happened live on 2026-11-27 09:26: no salvage line
         // anywhere, and the 2-module partial was thrown away
-        // unnoticed). The cut counts and missing fields name the
-        // cause for the next log read.
+        // unnoticed). The cut counts and the nested zod issues name
+        // the cause for the next log read.
         console.error(
           `[safeGenerate] salvage FAILED for ${modelLabel(model)} (${err.text.length} chars received, ${diagnostics.cutsTried} cut points tried, ${diagnostics.parsedCuts} parsed${diagnostics.lastValidationError ? ` — ${diagnostics.lastValidationError}` : ""})`
         );

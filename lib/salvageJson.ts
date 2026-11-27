@@ -78,6 +78,22 @@ import { z as zod } from "zod";
  * It never invents anything — it only returns what the model
  * already wrote, minus the incomplete tail, plus honest empty
  * defaults for fields that never arrived.
+ *
+ * SECOND FAILURE MODE (Vercel logs 2026-11-27 13:06:12 CST): the
+ * response was NOT truncated — a complete 6,469-char guide failed
+ * validation on NESTED rules (modules[0].format missing, a
+ * checkpoint with 2 questions against a min of 5, a practice
+ * problem with 2 options against a min of 3). The old partial path
+ * validated each module as a whole, so the bad module failed
+ * outright and, with the same fault in every module, the guide was
+ * thrown away — and the diagnosis it logged ("missing required
+ * fields: guideTitle, studyGuide, ...") contradicted the structured
+ * value, which contained all of those. The partial path is now a
+ * RECURSIVE repair (repairValue): it drops only the malformed
+ * nested pieces (the under-filled checkpoint, the 2-option options
+ * array), fills missing metadata with honest defaults (format
+ * "mixed"), and keeps the valid modules — and the diagnosis now
+ * reports the actual zod issues with their nested paths.
  */
 
 /** A comma outside a string, with the open-container stack at it. */
@@ -178,29 +194,46 @@ type WalkResult = {
 };
 
 /**
- * Summarise a zod failure as the missing required fields, when the
- * failure is missing fields at all ("studyGuide, summary"). Falls
- * back to the first issue's message. Used only for log lines.
+ * Format one zod issue path with bracket indices, so a log line
+ * names the NESTED failure exactly ("modules[0].format",
+ * "modules[0].checkpoint.questions") instead of a bare field name.
  */
-function missingFieldsSummary(
+function formatIssuePath(path: Array<string | number>): string {
+  let out = "";
+  for (const seg of path) {
+    if (typeof seg === "number") out += `[${seg}]`;
+    else out += out ? `.${seg}` : seg;
+  }
+  return out || "(root)";
+}
+
+/** How many zod issues a log diagnosis shows before summarising. */
+const MAX_ISSUES_IN_LOG = 6;
+
+/**
+ * Summarise a zod failure as its ACTUAL issues with nested paths
+ * ("3 issue(s): modules[0].format: Required; ..."), for the server
+ * logs. The previous summary listed only top-level missing fields —
+ * which MISLED the 2026-11-27 13:06 log read: it reported
+ * "missing required fields: guideTitle, studyGuide, summary,
+ * keyTerms, keyConcepts, modules" while the structured value DID
+ * contain all of those top-level fields, and the real failures were
+ * nested (modules[0].format missing, checkpoint with 2 questions,
+ * practice options with 2 entries). A diagnosis that contradicts
+ * the structured value sends the next fix at the wrong layer.
+ */
+function formatValidationIssues(
   schema: z.ZodType<unknown>,
   value: unknown
 ): string {
   const result = schema.safeParse(value);
   if (result.success) return "valid";
-  const missing = result.error.issues
-    .filter(
-      (issue) =>
-        issue.code === "invalid_type" &&
-        (issue as { received?: unknown }).received === "undefined"
-    )
-    .map((issue) => issue.path.join("."))
-    .filter((p) => p.length > 0);
-  if (missing.length > 0) return `missing required fields: ${missing.join(", ")}`;
-  return result.error.issues
-    .slice(0, 3)
-    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-    .join("; ");
+  const issues = result.error.issues;
+  const shown = issues
+    .slice(0, MAX_ISSUES_IN_LOG)
+    .map((issue) => `${formatIssuePath(issue.path)}: ${issue.message}`);
+  const more = issues.length - shown.length;
+  return `${issues.length} issue(s): ${shown.join("; ")}${more > 0 ? `; … +${more} more` : ""}`;
 }
 
 /**
@@ -241,7 +274,7 @@ function walkCuts(
     const whole = JSON.parse(cleaned);
     if (!validate || validate(whole)) return { value: whole, diagnostics };
     if (schemaForSummary)
-      diagnostics.lastValidationError = missingFieldsSummary(schemaForSummary, whole);
+      diagnostics.lastValidationError = formatValidationIssues(schemaForSummary, whole);
     // Complete JSON that fails validation: fall through to the cut
     // walk — an earlier prefix may still be a valid guide.
   } catch {
@@ -258,8 +291,16 @@ function walkCuts(
       const parsed = JSON.parse(closed);
       diagnostics.parsedCuts += 1;
       if (!validate || validate(parsed)) return { value: parsed, diagnostics };
-      if (schemaForSummary)
-        diagnostics.lastValidationError = missingFieldsSummary(schemaForSummary, parsed);
+      // Parses but does not validate (for example a module cut off
+      // before a required field) — try an earlier cut. The diagnosis
+      // is set ONCE, from the LATEST parseable cut: the walk runs
+      // latest-first, so later overwrites would come from EARLIER,
+      // less complete prefixes — that is how the 13:06 log ended up
+      // naming top-level fields that the complete response already
+      // had. When the whole value parsed above, its diagnosis
+      // already stands and is never overwritten here.
+      if (schemaForSummary && !diagnostics.lastValidationError)
+        diagnostics.lastValidationError = formatValidationIssues(schemaForSummary, parsed);
       // Parses but does not validate (for example a module cut off
       // before a required field) — try an earlier cut.
     } catch {
@@ -304,21 +345,250 @@ function emptyDefaultFor(field: z.ZodTypeAny): unknown {
   return undefined;
 }
 
+/** Metadata string fields whose schema description names its own
+ *  fallback value. Module `format` is the one: the schema says
+ *  "anything else uses 'mixed'", and the generate route already
+ *  fills "mixed" for a missing format on the simplified path
+ *  (app/api/generate/route.ts trySimplified) — the repairer matches
+ *  that convention instead of filling an empty string. */
+const METADATA_STRING_DEFAULTS: Record<string, string> = {
+  format: "mixed",
+};
+
+/** The honest empty default for a missing required field, by its
+ *  type and field name. Returns undefined when no honest default
+ *  exists (an enum, an object, a union): a field that cannot be
+ *  defaulted honestly must fail the repair rather than be invented. */
+function defaultForMissing(field: z.ZodTypeAny, key: string): unknown {
+  const inner = unwrapField(field);
+  if (inner instanceof zod.ZodString) {
+    return METADATA_STRING_DEFAULTS[key] ?? "";
+  }
+  return emptyDefaultFor(field);
+}
+
+/** True when the schema accepts the field being absent (optional
+ *  or defaulted) — such a field may be dropped instead of failing
+ *  the object that holds it. */
+function acceptsUndefined(field: z.ZodTypeAny): boolean {
+  return field.safeParse(undefined).success;
+}
+
+/** What one recursive repair did, for the server logs. */
+type RepairOutcome = {
+  value: unknown;
+  /** Paths filled with honest empty defaults ("modules[0].format"). */
+  filled: string[];
+  /** Paths dropped — optional fields or array items removed. */
+  dropped: string[];
+};
+
+function joinFieldPath(base: string, key: string): string {
+  return base ? `${base}.${key}` : key;
+}
+
+function joinIndexPath(base: string, i: number): string {
+  return `${base}[${i}]`;
+}
+
+/**
+ * Recursively repair a parsed value against its zod schema, so a
+ * COMPLETE response that fails validation on NESTED rules still
+ * yields the usable guide inside it instead of a 503.
+ *
+ * LIVE CASE (Vercel logs 2026-11-27 13:06:12 CST): Pollinations
+ * returned a complete 6,469-char guide that failed the schema on
+ * three nested rules — modules[0].format missing (required string),
+ * modules[0].checkpoint.questions with 2 entries (min 5), and a
+ * practice problem with 2 options (min 3). The old partial path
+ * validated each MODULE as a whole, so module 0 failed outright;
+ * with the same fault in every module, modules filtered to [] and
+ * the whole guide was thrown away. The repair below drops only the
+ * malformed PIECES:
+ *
+ * - A missing REQUIRED field is filled with its honest empty
+ *   default ONLY when it is metadata or a root-level section: at
+ *   the root, a missing section (keyTerms [], studyGuide "") is
+ *   filled, which is what saves a truncated guide whose required
+ *   scalars trail the truncation point; inside a nested object,
+ *   only a metadata scalar may be defaulted (format "mixed", a
+ *   module number 0). A nested object missing required CONTENT
+ *   (a concept with no title/definition/example, a question with
+ *   no explanation) or a whole SECTION (a module with no practice
+ *   array, a group with no problems) FAILS — the parent drops it
+ *   instead of shipping a hollow item, and the cut walk continues
+ *   to an earlier cut. That is the old whole-module behaviour for
+ *   truncation, preserved: a half-written trailing module is
+ *   dropped, not kept with an empty practice section.
+ * - An OPTIONAL field whose value cannot be repaired is DROPPED:
+ *   a checkpoint with 2 questions is dropped whole (the module
+ *   keeps its concepts and practice — a checkpoint is optional);
+ *   an options array with 2 entries is dropped from its practice
+ *   problem (the problem becomes a short-answer one — options are
+ *   optional there — and keeps the question, correct answer, and
+ *   explanation the model actually wrote).
+ * - An array item that cannot be repaired is dropped: a quiz
+ *   question with 2 options is dropped (options are REQUIRED there,
+ *   so the question cannot become short-answer); a module whose
+ *   concepts array is empty is dropped. An array that falls below
+ *   its min length fails its parent, which then drops or fails in
+ *   turn — a guide whose every module is unrepairable still
+ *   returns null.
+ *
+ * It NEVER invents content: it only removes what is malformed and
+ * fills empty defaults for missing metadata. Every surviving
+ * module, concept, question, option, and answer is text the model
+ * actually wrote. The final safeParse on the repaired object is
+ * the gate — a repair that still does not validate returns null.
+ */
+function repairValue(
+  value: unknown,
+  schema: z.ZodTypeAny,
+  path: string
+): RepairOutcome | null {
+  // Optional / defaulted wrappers: repair the inner type. (An
+  // absent value never reaches here — the parent handles absence.)
+  if (
+    schema instanceof zod.ZodOptional ||
+    schema instanceof zod.ZodDefault
+  ) {
+    if (value === undefined) return null;
+    return repairValue(
+      value,
+      (schema as zod.ZodOptional<zod.ZodTypeAny>)._def.innerType,
+      path
+    );
+  }
+  if (schema instanceof zod.ZodNullable) {
+    if (value === null) return { value: null, filled: [], dropped: [] };
+    return repairValue(
+      value,
+      (schema as zod.ZodNullable<zod.ZodTypeAny>)._def.innerType,
+      path
+    );
+  }
+  if (schema instanceof zod.ZodObject) {
+    if (value === null || typeof value !== "object" || Array.isArray(value))
+      return null;
+    const shape = schema.shape as Record<string, z.ZodTypeAny>;
+    const record = value as Record<string, unknown>;
+    const filled: string[] = [];
+    const dropped: string[] = [];
+    const out: Record<string, unknown> = {};
+    for (const [key, field] of Object.entries(shape)) {
+      const childPath = joinFieldPath(path, key);
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        const repaired = repairValue(record[key], field, childPath);
+        if (repaired !== null) {
+          out[key] = repaired.value;
+          filled.push(...repaired.filled);
+          dropped.push(...repaired.dropped);
+          continue;
+        }
+        // Unrepairable present field: drop it when the schema
+        // accepts its absence (optional), otherwise the whole
+        // object is unrepairable.
+        if (acceptsUndefined(field)) {
+          dropped.push(childPath);
+          continue;
+        }
+        return null;
+      }
+      // Absent: fine to omit when the schema accepts its absence
+      // (optional, defaulted, or nullable).
+      if (acceptsUndefined(field)) continue;
+      // A missing required field inside a NESTED object is filled
+      // only when it is metadata, never when it is content or a
+      // whole section: a module whose `practice` array never arrived
+      // is structurally incomplete — the walk must drop the module
+      // and continue to an earlier cut, not ship a module with no
+      // practice (that is the old whole-module behaviour, and the
+      // 09:26 replay depends on it). Likewise a concept missing
+      // its title/definition/example, or a question missing its
+      // explanation, is an under-filled item: the parent drops it
+      // instead of keeping a hollow one. Only a metadata scalar
+      // may be defaulted here (format "mixed", a module number 0).
+      // At the ROOT (path "") the old rule stands: missing sections
+      // are filled with honest empty defaults (keyTerms [],
+      // studyGuide ""), which is what saves a truncated guide whose
+      // required scalars trail the truncation point.
+      if (path !== "") {
+        const inner = unwrapField(field);
+        const isMetadataScalar =
+          inner instanceof zod.ZodNumber ||
+          inner instanceof zod.ZodBoolean ||
+          (inner instanceof zod.ZodString &&
+            METADATA_STRING_DEFAULTS[key] !== undefined);
+        if (!isMetadataScalar) return null;
+      }
+      const fallback = defaultForMissing(field, key);
+      if (fallback === undefined) return null;
+      out[key] = fallback;
+      filled.push(childPath);
+    }
+    const result = schema.safeParse(out);
+    if (!result.success) return null;
+    return { value: result.data, filled, dropped };
+  }
+  if (schema instanceof zod.ZodArray) {
+    if (!Array.isArray(value)) return null;
+    const element = (schema as zod.ZodArray<zod.ZodTypeAny>)._def
+      .type as z.ZodTypeAny;
+    const min = (schema as zod.ZodArray<zod.ZodTypeAny>)._def.minLength
+      ?.value ?? 0;
+    const max = (schema as zod.ZodArray<zod.ZodTypeAny>)._def.maxLength
+      ?.value ?? null;
+    const filled: string[] = [];
+    const dropped: string[] = [];
+    const kept: unknown[] = [];
+    for (let i = 0; i < value.length; i++) {
+      const repaired = repairValue(value[i], element, joinIndexPath(path, i));
+      if (repaired !== null) {
+        kept.push(repaired.value);
+        filled.push(...repaired.filled);
+        dropped.push(...repaired.dropped);
+      } else {
+        dropped.push(joinIndexPath(path, i));
+      }
+    }
+    if (kept.length < min) return null;
+    if (max !== null && kept.length > max) {
+      const excess = kept.length - max;
+      kept.length = max;
+      dropped.push(`${path}: dropped ${excess} item(s) over the max of ${max}`);
+    }
+    return { value: kept, filled, dropped };
+  }
+  if (schema instanceof zod.ZodUnion) {
+    for (const option of (
+      schema as zod.ZodUnion<[zod.ZodTypeAny, ...zod.ZodTypeAny[]]>
+    )._def.options as z.ZodTypeAny[]) {
+      const repaired = repairValue(value, option, path);
+      if (repaired !== null) return repaired;
+    }
+    return null;
+  }
+  // Primitives, enums, literals, effects: only an already-valid
+  // value survives — a wrong-typed value is never coerced or
+  // invented.
+  return schema.safeParse(value).success
+    ? { value, filled: [], dropped: [] }
+    : null;
+}
+
 /**
  * Normalise a parsed prefix into a candidate object for the strict
- * schema: drop array items that do not validate against the array's
- * element schema (a half-written trailing module, concept, or
- * question is dropped, never shipped broken), and fill missing
- * top-level fields with honest empty defaults. Returns null when
- * the prefix cannot be normalised honestly. The final strict
- * safeParse is the gate — a normalised object that still does not
- * validate (for example modules emptied to [] by the filter, below
- * the min(1) bound) is rejected and the walk continues.
+ * schema, via the recursive repair above: malformed nested pieces
+ * are dropped, missing metadata is filled with honest empty
+ * defaults, and the surviving guide is returned. Returns null when
+ * the prefix cannot be normalised honestly (for example every
+ * module unrepairable, so modules falls below its min(1)). The
+ * final strict safeParse is the gate.
  */
 function normalizePartial<T>(
   value: unknown,
   schema: z.ZodType<T>
-): { data: T; filledFields: string[] } | null {
+): { data: T; filledFields: string[]; droppedPaths: string[] } | null {
   if (
     value === null ||
     typeof value !== "object" ||
@@ -326,36 +596,15 @@ function normalizePartial<T>(
     !(schema instanceof zod.ZodObject)
   )
     return null;
-  const shape = schema.shape as Record<string, z.ZodTypeAny>;
-  const record = value as Record<string, unknown>;
-  const filledFields: string[] = [];
-  const out: Record<string, unknown> = {};
-  for (const [key, field] of Object.entries(shape)) {
-    if (Object.prototype.hasOwnProperty.call(record, key)) {
-      const present = record[key];
-      // Array fields: keep only items that validate against the
-      // element schema, so a trailing half-written module is dropped
-      // instead of failing the whole guide.
-      const inner = unwrapField(field);
-      if (Array.isArray(present) && inner instanceof zod.ZodArray) {
-        const element = (inner as z.ZodArray<z.ZodTypeAny>)._def.type;
-        out[key] = present.filter((item) => element.safeParse(item).success);
-      } else {
-        out[key] = present;
-      }
-      continue;
-    }
-    // Absent: fine to omit when the schema accepts its absence
-    // (optional, defaulted, or nullable).
-    if (field.safeParse(undefined).success) continue;
-    const fallback = emptyDefaultFor(field);
-    if (fallback === undefined) return null;
-    out[key] = fallback;
-    filledFields.push(key);
-  }
-  const result = schema.safeParse(out);
+  const repaired = repairValue(value, schema as z.ZodTypeAny, "");
+  if (repaired === null) return null;
+  const result = schema.safeParse(repaired.value);
   if (!result.success) return null;
-  return { data: result.data, filledFields };
+  return {
+    data: result.data,
+    filledFields: repaired.filled,
+    droppedPaths: repaired.dropped,
+  };
 }
 
 /** Which fields the partial path filled, for the server logs. */
@@ -364,8 +613,12 @@ export type SalvageDiagnostics = SalvageWalkDiagnostics & {
    *  missing fields were filled with honest empty defaults; null
    *  when nothing could be salvaged. */
   mode: "strict" | "partial" | null;
-  /** Top-level fields the partial path filled with empty defaults. */
+  /** Fields the partial path filled with empty defaults (top-level
+   *  in the old path; nested paths now, e.g. "modules[0].format"). */
   filledFields: string[];
+  /** Paths the partial path dropped (optional fields or array items
+   *  removed, e.g. "modules[0].checkpoint"). Empty on strict. */
+  droppedPaths: string[];
 };
 
 /** Full salvage outcome, with diagnostics for the server logs. */
@@ -382,15 +635,19 @@ export type SalvageResult<T> = {
  * or null when the text cannot be salvaged into a valid object.
  *
  * Two passes, latest cut first: (1) STRICT — the prefix validates
- * as-is, exactly as before; (2) PARTIAL — the prefix is normalised
- * (incomplete array items dropped, missing top-level fields filled
- * with honest empty defaults) and then validated. The partial pass
- * is what saves the live 09:26 case, where the required scalar
- * fields trail the truncation point: a 2-module guide with an empty
- * studyGuide is returned instead of a 503, and the route's repair
- * pass and /api/enrich add the rest. It never invents content —
- * filled fields are empty strings / arrays, and every surviving
- * module, concept, and question is text the model actually wrote.
+ * as-is, exactly as before; (2) PARTIAL — the prefix is repaired
+ * recursively (malformed nested pieces dropped, missing metadata
+ * filled with honest empty defaults — see repairValue) and then
+ * validated. The partial pass is what saves the live 09:26 case,
+ * where the required scalar fields trail the truncation point: a
+ * 2-module guide with an empty studyGuide is returned instead of a
+ * 503 — and the live 13:06 case, where a COMPLETE guide failed on
+ * nested rules: the guide is returned with its bad checkpoint
+ * dropped and its format defaulted, instead of a 503. The route's
+ * repair pass and /api/enrich add the rest. It never invents
+ * content — filled fields are empty strings / arrays, dropped
+ * pieces are gone (never padded), and every surviving module,
+ * concept, and question is text the model actually wrote.
  */
 export function salvageObject<T>(
   text: string,
@@ -415,12 +672,13 @@ export function salvageObjectDetailed<T>(
     if (result.success) {
       return {
         object: result.data,
-        diagnostics: { ...strict.diagnostics, mode: "strict", filledFields: [] },
+        diagnostics: { ...strict.diagnostics, mode: "strict", filledFields: [], droppedPaths: [] },
       };
     }
   }
-  // Pass 2 — partial: normalise (drop broken items, fill missing
-  // top-level fields with honest empty defaults), then validate.
+  // Pass 2 — partial: repair recursively (drop malformed nested
+  // pieces, fill missing metadata with honest empty defaults),
+  // then validate.
   const partial = walkCuts(text, (value) => {
     const normalised = normalizePartial(value, schema);
     return normalised !== null;
@@ -434,12 +692,14 @@ export function salvageObjectDetailed<T>(
           ...partial.diagnostics,
           mode: "partial",
           filledFields: normalised.filledFields,
+          droppedPaths: normalised.droppedPaths,
         },
       };
     }
   }
   // Nothing salvaged — report the best diagnosis from the strict
-  // pass (its last parseable prefix names the missing fields).
+  // pass (the whole value's nested issues when it parsed, else the
+  // latest parseable prefix's).
   return {
     object: null,
     diagnostics: {
@@ -450,6 +710,7 @@ export function salvageObjectDetailed<T>(
         partial.diagnostics.lastValidationError,
       mode: null,
       filledFields: [],
+      droppedPaths: [],
     },
   };
 }
