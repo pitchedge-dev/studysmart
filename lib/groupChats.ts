@@ -69,6 +69,12 @@ export type GroupWriteResult = {
   needsMigration?: boolean;
   message?: string;
   groupId?: string;
+  /** leaveGroup only: true when the leaver was the last member, so
+   *  the group itself was deleted instead of left empty. */
+  groupDeleted?: boolean;
+  /** leaveGroup only: user id of the member who became the new
+   *  creator when the old creator left with members remaining. */
+  transferredTo?: string;
 };
 
 /** "relation does not exist" — the 0010 tables are not applied live yet. */
@@ -216,6 +222,55 @@ export function mergeMessages(
     const t = a.created_at.localeCompare(b.created_at);
     return t !== 0 ? t : a.id.localeCompare(b.id);
   });
+}
+
+/**
+ * The incremental-poll rule, mirrored from listGroupMessages for
+ * tests: a message counts as new when its created_at is AT OR AFTER
+ * the last message shown. INCLUSIVE on purpose — two messages can
+ * share a timestamp (Postgres now() is per-transaction, and two fast
+ * sends can land in the same microsecond), so a strict `>` would
+ * silently drop the second one. The >= overlap re-fetches the
+ * boundary message, and mergeMessages dedupes by id, so nothing is
+ * ever shown twice.
+ */
+export function isNewSincePoll(
+  message: GroupChatMessageRow,
+  lastSeen: GroupChatMessageRow | null
+): boolean {
+  if (!lastSeen) return true;
+  return message.created_at.localeCompare(lastSeen.created_at) >= 0;
+}
+
+export type LeaveOutcome =
+  | { action: "delete-group" }
+  | { action: "transfer"; newCreatorId: string }
+  | { action: "nothing" };
+
+/**
+ * What a leave means for the group, decided from the members left
+ * AFTER the leaver is removed. Pure — leaveGroup calls this, never
+ * the network.
+ * - Nobody left: the group is deleted instead of left empty.
+ * - The creator left with members remaining: the longest-standing
+ *   remaining member (earliest joined_at, user id breaks ties so the
+ *   pick is deterministic) becomes the new creator, so rename,
+ *   delete, and add-members stay reachable.
+ * - Anyone else leaves: nothing changes — the creator and the group
+ *   both stay.
+ */
+export function resolveLeaveOutcome(args: {
+  leaverId: string;
+  currentCreatorId: string;
+  remainingMembers: GroupChatMemberRow[];
+}): LeaveOutcome {
+  if (args.remainingMembers.length === 0) return { action: "delete-group" };
+  if (args.leaverId !== args.currentCreatorId) return { action: "nothing" };
+  const sorted = [...args.remainingMembers].sort((a, b) => {
+    const t = a.joined_at.localeCompare(b.joined_at);
+    return t !== 0 ? t : a.user_id.localeCompare(b.user_id);
+  });
+  return { action: "transfer", newCreatorId: sorted[0].user_id };
 }
 
 /** One-line preview for the group list. */
@@ -369,8 +424,12 @@ export async function getGroupMembers(groupId: string): Promise<Profile[]> {
   );
 }
 
-/** Messages of a group, oldest first. With `after`, only messages newer
- *  than that timestamp — the polling loop uses this. */
+/** Messages of a group, oldest first. With `after`, only messages at
+ *  or after that timestamp — the polling loop uses this. INCLUSIVE
+ *  (>=, not >): two messages can share a created_at, and a strict
+ *  `>` would silently drop the second one. The overlap is safe
+ *  because the chat view merges by id (mergeMessages dedupes). The
+ *  id tiebreak keeps the order stable when timestamps are equal. */
 export async function listGroupMessages(
   groupId: string,
   after?: string
@@ -381,8 +440,9 @@ export async function listGroupMessages(
     .from("group_chat_messages")
     .select("*")
     .eq("group_id", groupId)
-    .order("created_at", { ascending: true });
-  if (after) query = query.gt("created_at", after);
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (after) query = query.gte("created_at", after);
   const { data, error } = await query;
   if (error) {
     if (!isMissingRelation(error))
@@ -501,13 +561,82 @@ export async function shareGuideToGroup(args: {
   return { ok: true };
 }
 
-/** Leave a group — any member can leave at any time. */
+/**
+ * Leave a group — any member can leave at any time.
+ *
+ * Order matters, and it is load-bearing for RLS:
+ * 1. Transfer FIRST (when the creator leaves with members remaining):
+ *    the update policy's with-check only lets the current creator hand
+ *    the role to someone who is already a member, and the check can
+ *    only see member rows while the caller is still a member — so the
+ *    transfer must run before the leaver's own member row is deleted.
+ *    If the transfer fails, nothing has changed and the leave fails
+ *    cleanly; if the member-row delete then fails, the group still has
+ *    a valid creator and the leaver can simply try again.
+ * 2. Last member leaving: delete the GROUP itself instead of the
+ *    member row — the cascade removes the member row and the messages,
+ *    so no empty ownerless group is ever left behind.
+ */
 export async function leaveGroup(
   groupId: string,
   userId: string
 ): Promise<GroupWriteResult> {
   const sb = getSupabase();
   if (!sb) return { ok: false };
+  const { data: group, error: groupError } = await sb
+    .from("group_chats")
+    .select("created_by")
+    .eq("id", groupId)
+    .maybeSingle();
+  if (groupError) {
+    if (isMissingRelation(groupError))
+      return { ok: false, needsMigration: true };
+    console.error("[groupChats] leave group failed:", groupError.message);
+    return { ok: false, message: "Could not leave the group. Try again." };
+  }
+  if (!group)
+    return { ok: false, message: "That group no longer exists." };
+  const { data: memberRows, error: memberError } = await sb
+    .from("group_chat_members")
+    .select("user_id, joined_at")
+    .eq("group_id", groupId)
+    .order("joined_at", { ascending: true })
+    .order("user_id", { ascending: true });
+  if (memberError) {
+    if (isMissingRelation(memberError))
+      return { ok: false, needsMigration: true };
+    console.error("[groupChats] leave group failed:", memberError.message);
+    return { ok: false, message: "Could not leave the group. Try again." };
+  }
+  const remaining = ((memberRows ?? []) as GroupChatMemberRow[]).filter(
+    (m) => m.user_id !== userId
+  );
+  const outcome = resolveLeaveOutcome({
+    leaverId: userId,
+    currentCreatorId: (group as { created_by: string }).created_by,
+    remainingMembers: remaining,
+  });
+  if (outcome.action === "delete-group") {
+    const { error: deleteError } = await sb
+      .from("group_chats")
+      .delete()
+      .eq("id", groupId);
+    if (deleteError) {
+      console.error("[groupChats] leave group failed:", deleteError.message);
+      return { ok: false, message: "Could not leave the group. Try again." };
+    }
+    return { ok: true, groupDeleted: true };
+  }
+  if (outcome.action === "transfer") {
+    const { error: transferError } = await sb
+      .from("group_chats")
+      .update({ created_by: outcome.newCreatorId })
+      .eq("id", groupId);
+    if (transferError) {
+      console.error("[groupChats] transfer creator failed:", transferError.message);
+      return { ok: false, message: "Could not leave the group. Try again." };
+    }
+  }
   const { error } = await sb
     .from("group_chat_members")
     .delete()
@@ -519,7 +648,11 @@ export async function leaveGroup(
     console.error("[groupChats] leave group failed:", error.message);
     return { ok: false, message: "Could not leave the group. Try again." };
   }
-  return { ok: true };
+  return {
+    ok: true,
+    transferredTo:
+      outcome.action === "transfer" ? outcome.newCreatorId : undefined,
+  };
 }
 
 /** Remove a member — only the creator. */

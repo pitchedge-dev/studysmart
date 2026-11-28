@@ -329,7 +329,22 @@ export default function GroupChats({
       setNotice(res.message ?? "Could not leave the group. Try again.");
       return;
     }
-    setNotice("You left the group.");
+    if (res.groupDeleted) {
+      setNotice(
+        "You left the group. You were the last member, so the group was deleted."
+      );
+    } else if (res.transferredTo) {
+      const nextName =
+        members.find((m) => m.user_id === res.transferredTo)?.display_name ??
+        null;
+      setNotice(
+        nextName
+          ? `You left the group. ${nextName} is now the creator.`
+          : "You left the group. A remaining member is now the creator."
+      );
+    } else {
+      setNotice("You left the group.");
+    }
     closeChat();
   }
 

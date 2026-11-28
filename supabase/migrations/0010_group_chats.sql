@@ -53,11 +53,25 @@ create policy "Users can create group chats"
   on public.group_chats for insert
   with check (auth.uid() = created_by);
 
--- Only the creator can rename a group.
-create policy "Creator can rename group chats"
+-- Only the creator can rename a group — or hand the creator role to a
+-- member when leaving (leaveGroup in lib/groupChats.ts). The new
+-- creator must already be a member, so ownership can never be handed
+-- to a stranger. The transfer runs BEFORE the leaver's member row is
+-- deleted: the with-check subquery can only see member rows while the
+-- caller is still a member (the group_chat_members select policy only
+-- shows rows to members), so deleting first would make the transfer
+-- fail and strand the group ownerless.
+create policy "Creator can rename or transfer group chats"
   on public.group_chats for update
   using (auth.uid() = created_by)
-  with check (auth.uid() = created_by);
+  with check (
+    auth.uid() = created_by
+    or exists (
+      select 1 from public.group_chat_members
+      where group_id = group_chats.id
+        and user_id = group_chats.created_by
+    )
+  );
 
 -- Only the creator can delete a group (members and messages cascade).
 create policy "Creator can delete group chats"
