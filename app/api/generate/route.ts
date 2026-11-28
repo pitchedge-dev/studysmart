@@ -43,6 +43,7 @@ import {
 import { parseGivenResources } from "@/lib/givenResources";
 import { qualityIssues, sanitizeGuide } from "@/lib/guideQuality";
 import { isPollinationsModel } from "@/lib/strictSchema";
+import { selectRepairModel } from "@/lib/repairModel";
 import { generateObjectSafe } from "@/lib/safeGenerate";
 // Simplified fallback shape lives in lib/routeSchemas.ts (moved there
 // so the strict-schema logic test can import the real definition —
@@ -193,11 +194,11 @@ export async function POST(req: NextRequest) {
 
     // Long structured guides route to the guide category: Gemini first
     // (proven structured output here), then the no-key safety net
-    // Pollinations SECOND, Cohere, GitHub Models, then the
-    // billing-dead ones (Moonshot, AIML, SambaNova, DeepSeek), then
-    // the no-key providers — and resolveSpecs interleaves them
-    // round-robin by provider, so one provider's outage cannot eat
-    // the wall (see lib/providers.ts).
+    // Pollinations SECOND, Cohere, GitHub Models, then the no-key
+    // providers — and resolveSpecs interleaves them round-robin by
+    // provider, so one provider's outage cannot eat the wall (see
+    // lib/providers.ts). Moonshot, AIML, SambaNova and DeepSeek were
+    // removed from every chain 2026-11-27 (billing-dead).
     const models = getModelsFor("guides");
     if (models.length === 0) {
       return NextResponse.json({ error: MISSING_KEY_MESSAGE }, { status: 500 });
@@ -496,12 +497,16 @@ export async function POST(req: NextRequest) {
     // result (see missingParts / qualityIssues) — a small guide for a
     // small input is left alone. The repair regenerates the whole guide
     // with a prompt naming exactly what was missing or wrong, on the
-    // model that already answered; the repaired guide is kept only
-    // when it has strictly fewer problems than the original (or none
-    // at all) — the repair never fails the request and never ships a
-    // worse guide. The repair only starts when the core landed early
-    // enough (see GENERATE_REPAIR_AFTER_MS) and its abort is cut to
-    // the wall clock remaining, so the request still finishes in time.
+    // model that already answered — or, when that model is
+    // Pollinations, on the next provider in the chain (Pollinations'
+    // free tier allows 1 reply per 45s per IP, so a same-model retry
+    // seconds later almost always fails — see below); the repaired
+    // guide is kept only when it has strictly fewer problems than the
+    // original (or none at all) — the repair never fails the request
+    // and never ships a worse guide. The repair only starts when the
+    // core landed early enough (see GENERATE_REPAIR_AFTER_MS) and its
+    // abort is cut to the wall clock remaining, so the request still
+    // finishes in time.
     const checkOpts = {
       extractConcepts: !!extractConcepts,
       includeQuiz: !!includeQuiz,
@@ -510,19 +515,26 @@ export async function POST(req: NextRequest) {
     const missing = missingParts(core, checkOpts);
     const quality = qualityIssues(core, checkOpts);
     const problemCount = missing.length + quality.length;
+    // Which model runs the repair: the serving model — EXCEPT when the
+    // serving model is Pollinations, when it is the NEXT provider in
+    // the chain (Pollinations' free tier allows 1 reply per 45s per
+    // IP, so a same-model retry seconds later almost always fails;
+    // see lib/repairModel.ts). Null means no repair — the original
+    // is kept, exactly as when a repair fails.
+    const repairModel = selectRepairModel(models, modelUsed);
     if (
       problemCount > 0 &&
-      modelUsed &&
+      repairModel &&
       Date.now() - startedAt < GENERATE_REPAIR_AFTER_MS
     ) {
       // The repair minimum follows the study time, so a short-session
       // guide is not "repaired" into a long one.
       const minModules = repairMinModules(hours);
       const problems = [...missing, ...quality].join("; ");
-      const repairPrompt = `${systemPromptFor(modelUsed)} IMPORTANT — REPAIR: a previous attempt at this guide came back with these problems: ${problems}. Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Every concept needs a workedExample with a REAL NUMERIC CALCULATION: the problem states real numbers from the topic, at least one step shows the arithmetic written out (for example 2,000 × 60 = 120,000), and the answer is the computed result with its unit. A time range, a vague count, or the word 'Calculate' with no numbers does NOT count. Every multiple-choice question needs one whyWrong entry for EACH wrong option. Keep the same depth and quality standard as a normal generation.`;
+      const repairPrompt = `${systemPromptFor(repairModel)} IMPORTANT — REPAIR: a previous attempt at this guide came back with these problems: ${problems}. Regenerate the COMPLETE guide from the supplied material, making sure it includes at least ${minModules} module${minModules === 1 ? "" : "s"} with at least 2 concepts each, targeted practice for every concept,${extractConcepts ? " a non-empty keyConcepts list," : ""}${includeQuiz ? " the quiz," : ""} and the full studyGuide Markdown. Every concept needs a workedExample with a REAL NUMERIC CALCULATION: the problem states real numbers from the topic, at least one step shows the arithmetic written out (for example 2,000 × 60 = 120,000), and the answer is the computed result with its unit. A time range, a vague count, or the word 'Calculate' with no numbers does NOT count. Every multiple-choice question needs one whyWrong entry for EACH wrong option. Keep the same depth and quality standard as a normal generation.`;
       try {
         const { object } = await generateObjectSafe({
-          model: modelUsed,
+          model: repairModel,
           zodSchema: GenerateResultSchema,
           system: repairPrompt,
           messages: [{ role: "user", content }],
@@ -550,7 +562,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (repairErr) {
         logError(
-          `[/api/generate] repair attempt failed (${modelLabel(modelUsed)}), keeping original:`,
+          `[/api/generate] repair attempt failed (${modelLabel(repairModel)}), keeping original:`,
           repairErr
         );
       }

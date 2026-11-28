@@ -14,14 +14,16 @@ import MeetYourBots from "./MeetYourBots";
  * "How it is powered", stated honestly from lib/providers.ts: every guide
  * is generated fresh by AI the moment you ask — nothing here is premade.
  * Google Gemini answers first, and Groq, OpenRouter, Cerebras, NVIDIA,
- * SambaNova, Cohere, Cloudflare, DeepSeek, Novita, SiliconFlow, AIML API,
- * Hugging Face, Moonshot, Zhipu and Qwen are wired in as free backup
- * providers, plus Pollinations — which needs no key at all and is
- * tried early in the chain as a safety net — so if one is busy or
- * out of free calls another one takes over. (Which of them actually
- * have keys set is an env-var matter — the popup claims the wiring,
- * not the keys.)
- * (Vercel AI Gateway was removed 2026-11-26: it needs a card on file.)
+ * Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu and Qwen
+ * are wired in as free backup providers, plus Pollinations — which needs
+ * no key at all and is tried early in the chain as a safety net — so if
+ * one is busy or out of free calls another one takes over. (Which of
+ * them actually have keys set is an env-var matter — the popup claims
+ * the wiring, not the keys.)
+ * (Vercel AI Gateway was removed 2026-11-26: it needs a card on file.
+ * Moonshot, AIML API, SambaNova and DeepSeek were removed from every
+ * chain 2026-11-27: billing-dead — free credits exhausted / card
+ * required.)
  */
 
 export const WELCOME_STORAGE_KEY = "studysmart-welcome-seen";
@@ -117,12 +119,12 @@ export default function WelcomeModal({
             <p className="mt-1.5 text-sm leading-relaxed text-ink-600">
               Every guide is generated fresh by AI the moment you ask — nothing
               here is premade. Google Gemini answers first, and Groq,
-              OpenRouter, Cerebras, NVIDIA, SambaNova, Cohere, Cloudflare,
-              DeepSeek, Novita, SiliconFlow, AIML API, Hugging Face,
-              Moonshot, Zhipu and Qwen are wired in as free backup
-              providers, plus Pollinations — which needs no key at all and
-              is tried early in the chain as a safety net. If one is busy or out
-              of free calls, another takes over automatically.
+              OpenRouter, Cerebras, NVIDIA, Cohere, Cloudflare,
+              Novita, SiliconFlow, Hugging Face, Zhipu and Qwen are
+              wired in as free backup providers, plus Pollinations —
+              which needs no key at all and is tried early in the chain
+              as a safety net. If one is busy or out of free calls,
+              another takes over automatically.
             </p>
           </div>
 
