@@ -5,7 +5,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 
 /**
- * Cross-provider AI routing, PER CATEGORY — 18 providers, mixed and
+ * Cross-provider AI routing, PER CATEGORY — 23 providers, mixed and
  * matched per job (docs/mix-match-2026-11-25.md).
  *
  * History: everything used to go through Google Gemini only, and the
@@ -13,7 +13,7 @@ import type { LanguageModel } from "ai";
  * which blocked the whole site. First we added one global fallback list
  * (Gemini → Groq → OpenRouter). Then each category routed to the provider
  * best for that job first, with the other two free providers as backups.
- * Then 12 free providers per category. Now 18: the Nov 2026 API hunt
+ * Then 12 free providers per category. Now 23: the Nov 2026 API hunt
  * (docs/api-hunt-2026-11-25.md) tested ~50 candidates and added
  * Pollinations (no key at all — verified live) and GitHub Models
  * (gated on GITHUB_TOKEN, NOT yet live-verified: the POST test was
@@ -25,6 +25,17 @@ import type { LanguageModel } from "ai";
  * best suited to it (strongest reasoning for guides, fastest for chat
  * and lite templates, strictest JSON for practice/games, vision-only
  * for check-reasoning), instead of one shared fallback order.
+ *
+ * 2026-11-28 — five MORE fallbacks from the same hunt shortlist,
+ * wired key-gated (fix-more-fallbacks): AI21 Labs (Jamba Mini 2),
+ * Upstage (Solar Pro 4), MiniMax (MiniMax-M2.7), 01.AI / Yi
+ * (yi-lightning) and Sarvam AI (sarvam-105b). All five are TEXT-ONLY
+ * (no verified vision model for any of them), so none is in the
+ * reasoning chain. All five sit AFTER the live providers and BEFORE
+ * Novita in every text chain and in getLiteModels, so with no key set
+ * the resolved chain is byte-identical to before this change. The
+ * hunt shortlist is now fully resolved: every candidate is either
+ * wired or rejected below with its reason.
  *
  * 2026-11-26 — the chains are now INTERLEAVED round-robin by
  * provider (see interleaveSpecs, applied in resolveSpecs): the lists
@@ -77,7 +88,7 @@ import type { LanguageModel } from "ai";
  * environment variables. Never hardcode, log, or commit a key value.
  * See .env.example for the names.
  *
- * The 18 providers (all free to start, no card — limits as published
+ * The 23 providers (all free to start, no card — limits as published
  * Nov 2026, re-check the consoles before relying on exact numbers):
  *  1. Google Gemini — AI Studio free tier (~20 req/day Flash).
  *  2. Groq — free, no card: 30 RPM, 1,000 req/day per model.
@@ -191,6 +202,60 @@ import type { LanguageModel } from "ai";
  *     account was suspended for insufficient balance and took live
  *     generation down with it (2026-11-25). Do not re-add it without
  *     a card-free way to use it.
+ * 20. AI21 Labs (Jamba) — $10 trial credits on signup, no card,
+ *     time-limited (pricing page says 7 days in one place, 3 months
+ *     in the docs — a grant either way, not an ongoing tier).
+ *     OpenAI-compatible (api.ai21.com/studio/v1). Jamba Mini 2 for
+ *     text. Text-only — NOT in the reasoning chain. CAVEAT: the old
+ *     /studio/v1/models listing returns 410, so model IDs may drift;
+ *     the chain treats a retired ID as retryable and moves on.
+ * 21. Upstage (Solar) — $10 signup credit, no card, per verification
+ *     2026-10-22; a 2026-11-26 probe says the general signup credit
+ *     is now UNCONFIRMED and solar-pro4 free access until 2027-03-31
+ *     is under an institutional-approval program — verify at signup.
+ *     OpenAI-compatible (api.upstage.ai/v1). Solar Pro 4 for text.
+ *     Text-only — NOT in the reasoning chain.
+ * 22. MiniMax — free trial credits on signup (¥15, ~30 days),
+ *     OpenAI-compatible (api.minimax.io/v1, international endpoint;
+ *     the China endpoint is api.minimaxi.chat/v1). MiniMax-M2.7
+ *     (current flagship, 1M context) for text. Text-only — NOT in
+ *     the reasoning chain. CAVEAT: one source says trial credits are
+ *     "tied to phone or email verification" — if signup needs phone
+ *     verification, skip this provider.
+ * 23. 01.AI / Yi (Lingyi Wanwu) — ¥10 free credits on signup, 5 RPM.
+ *     OpenAI-compatible. Base URL is https://api.lingyiwanwu.com/v1
+ *     (the current platform endpoint — the older https://api.01.ai/v1
+ *     in Apr 2026 guides is legacy). Yi-Lightning for text.
+ *     Text-only — NOT in the reasoning chain. Signup by email or
+ *     phone; international phone numbers reportedly work.
+ * 24. Sarvam AI — ₹100 free credits on signup, never expire, no card.
+ *     OpenAI-compatible. Base URL is https://api.sarvam.ai/v1 for
+ *     sarvam-105b — /v1 serves ONLY sarvam-105b and
+ *     sarvam-105b-conversations; /v2 (Token Factory) is for re-served
+ *     open-weight models and is whitelisted per key, so it is NOT
+ *     used here. sarvam-105b (128K context, reasoning on by default)
+ *     for text. Text-only — NOT in the reasoning chain.
+ *
+ * REJECTED 2026-11-28 (do not add — hunt shortlist, fully resolved):
+ * Nebius AI Studio ($1 trial credit requires a card to claim),
+ * Hyperbolic (inference needs a $5 deposit, or phone verification
+ * for the $1 credit — free tier cannot use inference), FriendliAI
+ * (no free tier; $10 minimum prepaid purchase, card required),
+ * Meta Llama API (no self-serve free API — waitlisted, US-only),
+ * StepFun (activating keys needs mainland China real-name
+ * verification + a mainland phone number), Baidu Qianfan (Chinese
+ * real-name verification — face scan or bank card — + phone number),
+ * Tencent Hunyuan / TokenHub (phone verification required — the
+ * email flow asks for a phone number and SMS code, WeChat/QQ bind a
+ * phone, mainland China numbers only — plus Tencent Cloud real-name
+ * verification; verified 2026-11-27), Krutrim (no callable API
+ * model ID could be verified anywhere — sources show a literal
+ * "MODEL_ID" placeholder — and the company pivoted from foundation
+ * models to cloud in 2026, so availability is uncertain),
+ * ByteDance Volcengine Ark (mainland: phone number + real-name
+ * verification; the international BytePlus ModelArk base URL and a
+ * fixed seed model ID were verified by only one secondary source
+ * each, with an unclear endpoint-activation model — not wired).
  *
  * REJECTED (do not add): Mistral (phone verification required),
  * Together AI (no free tier, $15 min purchase), Fireworks AI (no free
@@ -200,10 +265,8 @@ import type { LanguageModel } from "ai";
  * Replicate / Azure OpenAI / AWS Bedrock / Google Vertex AI / IBM
  * watsonx / Oracle OCI (need a payment card), DuckDuckGo AI (no
  * official API), Puter.js (client-side only, not server-usable).
- * Still unwired from the hunt shortlist (each ~15 lines once a key
- * exists): 01.AI, Baidu Qianfan, ByteDance Volcengine, Meta Llama API,
- * AI21 Labs, Hyperbolic, FriendliAI, Nebius, MiniMax, StepFun,
- * Upstage, Tencent Hunyuan, Krutrim, Sarvam.
+ * The hunt shortlist is fully resolved as of 2026-11-28 — every
+ * candidate is either wired above or rejected with its reason.
  *
  * Research:
  * ~/workspace/goals/studysmart-educational-web-app/hidden_files/multi-provider-research-2026-11-24.md
@@ -487,6 +550,69 @@ export const DASHSCOPE_TEXT_MODELS = ["qwen-plus", "qwen3-8b"] as const;
 /** DashScope vision model for /api/check-reasoning. */
 export const DASHSCOPE_VISION_MODEL = "qwen2.5-vl-72b-instruct";
 
+// ---------------------------------------------------------------------------
+// AI21 Labs (Jamba) — $10 trial credits on signup, no card,
+// time-limited grant (7 days per the pricing page, 3 months per the
+// docs — either way, not an ongoing tier). OpenAI-compatible
+// (api.ai21.com/studio/v1). Jamba Mini 2 is the current text model.
+// Text-only — no verified vision model, so NOT in the reasoning
+// chain. CAVEAT: the old /studio/v1/models listing returns 410, so
+// model IDs may drift; the chain treats a retired ID as retryable.
+// ---------------------------------------------------------------------------
+
+export const AI21_TEXT_MODEL = "jamba-mini-2";
+
+// ---------------------------------------------------------------------------
+// Upstage (Solar) — $10 signup credit, no card, per verification
+// 2026-10-22. OpenAI-compatible (api.upstage.ai/v1). Solar Pro 4 is
+// the current text model. Text-only — no verified Solar vision model,
+// so NOT in the reasoning chain. CAVEAT (2026-11-26 probe): the
+// general signup credit is now UNCONFIRMED and solar-pro4 free access
+// until 2027-03-31 is under an institutional-approval program —
+// verify at signup; without a key this provider is skipped silently.
+// ---------------------------------------------------------------------------
+
+export const UPSTAGE_TEXT_MODEL = "solar-pro4";
+
+// ---------------------------------------------------------------------------
+// MiniMax — free trial credits on signup (¥15, ~30 days), no card
+// mentioned anywhere. OpenAI-compatible (api.minimax.io/v1,
+// international endpoint; the China endpoint is
+// api.minimaxi.chat/v1). MiniMax-M2.7 is the current flagship (1M
+// context, released 2026-03-18). Text-only — no verified MiniMax
+// vision model, so NOT in the reasoning chain. CAVEAT: one source
+// says trial credits are "tied to phone or email verification" —
+// if signup needs phone verification, skip this provider.
+// ---------------------------------------------------------------------------
+
+export const MINIMAX_TEXT_MODEL = "MiniMax-M2.7";
+
+// ---------------------------------------------------------------------------
+// 01.AI / Yi (Lingyi Wanwu) — ¥10 free credits on signup, 5 RPM.
+// OpenAI-compatible. Base URL https://api.lingyiwanwu.com/v1 is the
+// current platform endpoint (multiple Nov 2026 sources; the older
+// https://api.01.ai/v1 in Apr 2026 guides is legacy). Yi-Lightning
+// is the flagship text model. Text-only — no vision model verified
+// for this chain, so NOT in the reasoning chain. Signup by
+// email or phone; international phone numbers reportedly work.
+// ---------------------------------------------------------------------------
+
+export const LINGYI_TEXT_MODEL = "yi-lightning";
+
+// ---------------------------------------------------------------------------
+// Sarvam AI — ₹100 free credits on signup, never expire, no card.
+// OpenAI-compatible. Base URL https://api.sarvam.ai/v1 serves ONLY
+// sarvam-105b and sarvam-105b-conversations (LiteLLM + a 2026-10-19
+// probe agree); /v2 (Token Factory) is for re-served open-weight
+// models, whitelisted per key — NOT used here. sarvam-105b (128K
+// context, reasoning on by default) is the flagship text model.
+// Text-only — no verified Sarvam vision model, so NOT in the
+// reasoning chain. Authorization: Bearer works (the native header is
+// api-subscription-key).
+// ---------------------------------------------------------------------------
+
+export const SARVAM_TEXT_MODEL = "sarvam-105b";
+
 // NOTE (2026-11-26): Vercel AI Gateway was removed from every chain.
 // It needs a credit card on file to unlock its free credits — which this
 // app will never add — and its account was suspended for insufficient
@@ -498,8 +624,8 @@ export const DASHSCOPE_VISION_MODEL = "qwen2.5-vl-72b-instruct";
 // docs/mix-match-2026-11-25.md). Each category lists its models grouped
 // How to read the lists below (and what resolveSpecs does with them).
 // The lists are written grouped by provider: the PRIMARY provider
-// first (best for that job), then backups in priority order — 18
-// providers per text category (primary + up to 13 backups). The same
+// first (best for that job), then backups in priority order — 23
+// providers per text category (primary + up to 18 backups). The same
 // provider appears in several categories, but the ORDER differs per
 // job: strongest reasoning leads guides, fastest/cheapest leads chat
 // and the lite steps, strictest JSON leads practice/games, vision-only
@@ -521,9 +647,11 @@ export const DASHSCOPE_VISION_MODEL = "qwen2.5-vl-72b-instruct";
 // second until a Groq key is set: Pollinations is the only provider
 // that works with zero keys set, so it must be tried while time
 // remains, not after the wall is nearly gone.
-// After the live providers come the no-key providers in their old
-// relative order (skipped silently until a key is set), then GitHub
-// Models (unverified, key-gated).
+// After the live providers come the key-gated providers in their old
+// relative order (skipped silently until a key is set — GitHub Models
+// among them, after Cohere), then the five 2026-11-28 additions
+// (AI21, Upstage, MiniMax, 01.AI, Sarvam — text-only, key-gated),
+// then Novita LAST in every text chain.
 //
 // The lists are NOT the try order: resolveSpecs() interleaves them
 // round-robin by provider (see interleaveSpecs), so the order
@@ -551,6 +679,11 @@ type ProviderKind =
   | "moonshot"
   | "zhipu"
   | "dashscope"
+  | "ai21"
+  | "upstage"
+  | "minimax"
+  | "lingyi"
+  | "sarvam"
 type ModelSpec = readonly [ProviderKind, string];
 
 export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
@@ -570,7 +703,9 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // then the no-key providers in their old relative order (NVIDIA
     // Nemotron 3 Ultra, OpenRouter, Zhipu GLM-4.5, DashScope
     // Qwen-Plus, Groq 20b, SiliconFlow, Hugging Face, Cloudflare,
-    // Cerebras, Novita). Moonshot, AIML, SambaNova and DeepSeek were
+    // Cerebras, then the five 2026-11-28 additions — AI21 Jamba Mini 2,
+    // Upstage Solar Pro 4, MiniMax-M2.7, 01.AI Yi-Lightning, Sarvam
+    // 105B — then Novita last). Moonshot, AIML, SambaNova and DeepSeek were
     // REMOVED from this chain 2026-11-27 (billing-dead — free credits
     // exhausted / card required, Vercel logs 2026-11-26/27); their
     // definitions stay in this file, so re-adding one is a one-line
@@ -600,6 +735,11 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["cerebras", "gpt-oss-120b"],
+      ["ai21", "jamba-mini-2"],
+      ["upstage", "solar-pro4"],
+      ["minimax", "MiniMax-M2.7"],
+      ["lingyi", "yi-lightning"],
+      ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
     // Conversational tutor, short replies — latency is what matters.
@@ -608,7 +748,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // GitHub Models, then the fast/cheap small models and the rest
     // in their old relative order (Zhipu Air, SiliconFlow Qwen3-8B,
     // DashScope Qwen3-8B, Cerebras, Cloudflare, OpenRouter, NVIDIA,
-    // Hugging Face, Novita). Moonshot, AIML, SambaNova and DeepSeek
+    // Hugging Face, then the five 2026-11-28 additions — AI21, Upstage,
+    // MiniMax, 01.AI, Sarvam — then Novita last). Moonshot, AIML, SambaNova and DeepSeek
     // were REMOVED from this chain 2026-11-27 (billing-dead).
     chat: [
       ["groq", "openai/gpt-oss-20b"],
@@ -629,6 +770,11 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["openrouter", "openrouter/free"],
       ["nvidia", "openai/gpt-oss-120b"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
+      ["ai21", "jamba-mini-2"],
+      ["upstage", "solar-pro4"],
+      ["minimax", "MiniMax-M2.7"],
+      ["lingyi", "yi-lightning"],
+      ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
     // Battle Arena games — short trivia, templates must return in seconds.
@@ -637,7 +783,9 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // Then the no-key safety net Pollinations SECOND, Gemini Lite,
     // Cohere, GitHub Models, then the rest in their old relative
     // order (OpenRouter Super VL, Zhipu Air, SiliconFlow Qwen3-8B,
-    // Cerebras, NVIDIA, DashScope, Cloudflare, Hugging Face, Novita).
+    // Cerebras, NVIDIA, DashScope, Cloudflare, Hugging Face, then the
+    // five 2026-11-28 additions — AI21, Upstage, MiniMax, 01.AI,
+    // Sarvam — then Novita last).
     // Moonshot, AIML, SambaNova and DeepSeek were REMOVED from this
     // chain 2026-11-27 (billing-dead).
     games: [
@@ -658,6 +806,11 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["dashscope", "qwen-plus"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["huggingface", "meta-llama/Llama-3.1-8B-Instruct"],
+      ["ai21", "jamba-mini-2"],
+      ["upstage", "solar-pro4"],
+      ["minimax", "MiniMax-M2.7"],
+      ["lingyi", "yi-lightning"],
+      ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
     // Small structured question sets — schema reliability matters most
@@ -666,7 +819,9 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // Pollinations SECOND, Cohere, GitHub Models, then the rest in
     // their old relative order (Groq 120b strict JSON, OpenRouter
     // Super VL, NVIDIA Nemotron 3 Ultra, Zhipu, DashScope,
-    // SiliconFlow, HF, Cloudflare, Cerebras, Novita). Moonshot,
+    // SiliconFlow, HF, Cloudflare, Cerebras, then the five 2026-11-28
+    // additions — AI21, Upstage, MiniMax, 01.AI, Sarvam — then Novita
+    // last). Moonshot,
     // AIML, SambaNova and DeepSeek were REMOVED from this chain
     // 2026-11-27 (billing-dead).
     practice: [
@@ -686,6 +841,11 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
       ["cloudflare", "@cf/openai/gpt-oss-120b"],
       ["cerebras", "gpt-oss-120b"],
+      ["ai21", "jamba-mini-2"],
+      ["upstage", "solar-pro4"],
+      ["minimax", "MiniMax-M2.7"],
+      ["lingyi", "yi-lightning"],
+      ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
     // Suggesting real YouTube video IDs — a short, cheap call, so the
@@ -696,7 +856,9 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // hallucinated ID from a cheap model just costs one retry, never
     // a fake video. Then Cohere, GitHub Models, then the rest in
     // their old relative order (Groq, OpenRouter, NVIDIA, Zhipu,
-    // DashScope, SiliconFlow, HF, Cerebras, Novita). Moonshot, AIML,
+    // DashScope, SiliconFlow, HF, Cerebras, then the five 2026-11-28
+    // additions — AI21, Upstage, MiniMax, 01.AI, Sarvam — then Novita
+    // last). Moonshot, AIML,
     // SambaNova and DeepSeek were REMOVED from this chain 2026-11-27
     // (billing-dead).
     videos: [
@@ -716,6 +878,11 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
       ["cerebras", "qwen-3-235b-a22b-instruct-2507"],
+      ["ai21", "jamba-mini-2"],
+      ["upstage", "solar-pro4"],
+      ["minimax", "MiniMax-M2.7"],
+      ["lingyi", "yi-lightning"],
+      ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
     // Vision: reads a handwriting PNG and grades work + process.
@@ -729,7 +896,9 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // multimodal + JSON mode, 450 tok/s; HF Llama 3.2 11B Vision;
     // Cerebras Gemma 4 31B; Cloudflare Llama 3.2 11B Vision).
     // (DeepSeek and Novita have no reliable vision model, so they are
-    // not in this chain. AIML, Moonshot and SambaNova were REMOVED
+    // not in this chain, and neither do the five 2026-11-28 additions
+    // — AI21, Upstage, MiniMax, 01.AI, Sarvam are all text-only, so
+    // none is in this chain. AIML, Moonshot and SambaNova were REMOVED
     // 2026-11-27 — billing-dead, free credits exhausted / card
     // required — so this chain is 12 vision providers, 14 models.)
     reasoning: [
@@ -773,6 +942,11 @@ export const CATEGORY_ROUTING: Record<
       "Hugging Face (Qwen 2.5 72B)",
       "Cloudflare (gpt-oss-120b)",
       "Cerebras (gpt-oss-120b, 8K context cap)",
+      "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
+      "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
+      "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
+      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
+      "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
   },
@@ -791,6 +965,11 @@ export const CATEGORY_ROUTING: Record<
       "OpenRouter (Nemotron 3.5 Super VL)",
       "NVIDIA NIM (gpt-oss-120b)",
       "Hugging Face (Llama 3.1 8B)",
+      "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
+      "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
+      "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
+      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
+      "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
   },
@@ -809,6 +988,11 @@ export const CATEGORY_ROUTING: Record<
       "DashScope (Qwen-Plus)",
       "Cloudflare (gpt-oss-120b)",
       "Hugging Face (Llama 3.1 8B)",
+      "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
+      "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
+      "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
+      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
+      "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
   },
@@ -827,6 +1011,11 @@ export const CATEGORY_ROUTING: Record<
       "Hugging Face (Qwen 2.5 72B)",
       "Cloudflare (gpt-oss-120b)",
       "Cerebras (gpt-oss-120b)",
+      "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
+      "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
+      "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
+      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
+      "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
   },
@@ -845,6 +1034,11 @@ export const CATEGORY_ROUTING: Record<
       "SiliconFlow (DeepSeek V3.2)",
       "Hugging Face (Qwen 2.5 72B)",
       "Cerebras (Qwen 3 235B)",
+      "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
+      "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
+      "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
+      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
+      "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
   },
@@ -1047,6 +1241,56 @@ function createDashScopeProvider() {
   });
 }
 
+function createAi21Provider() {
+  const apiKey = process.env.AI21_API_KEY;
+  if (!apiKey) return null;
+  return createOpenAI({
+    apiKey,
+    baseURL: "https://api.ai21.com/studio/v1",
+  });
+}
+
+function createUpstageProvider() {
+  const apiKey = process.env.UPSTAGE_API_KEY;
+  if (!apiKey) return null;
+  return createOpenAI({
+    apiKey,
+    baseURL: "https://api.upstage.ai/v1",
+  });
+}
+
+function createMiniMaxProvider() {
+  const apiKey = process.env.MINIMAX_API_KEY;
+  if (!apiKey) return null;
+  return createOpenAI({
+    apiKey,
+    baseURL: "https://api.minimax.io/v1",
+  });
+}
+
+function createLingyiProvider() {
+  // 01.AI / Yi — base URL is api.lingyiwanwu.com/v1 (current platform
+  // endpoint); the older api.01.ai/v1 in Apr 2026 guides is legacy.
+  const apiKey = process.env.LINGYI_API_KEY;
+  if (!apiKey) return null;
+  return createOpenAI({
+    apiKey,
+    baseURL: "https://api.lingyiwanwu.com/v1",
+  });
+}
+
+function createSarvamProvider() {
+  // Sarvam — /v1 serves ONLY sarvam-105b and sarvam-105b-conversations;
+  // /v2 (Token Factory) is for re-served open-weight models and is
+  // whitelisted per key, so it is NOT used here. Bearer auth works.
+  const apiKey = process.env.SARVAM_API_KEY;
+  if (!apiKey) return null;
+  return createOpenAI({
+    apiKey,
+    baseURL: "https://api.sarvam.ai/v1",
+  });
+}
+
 type ProviderInstances = {
   google: ReturnType<typeof createGoogle>;
   groq: ReturnType<typeof createGroqProvider>;
@@ -1066,6 +1310,11 @@ type ProviderInstances = {
   moonshot: ReturnType<typeof createMoonshotProvider>;
   zhipu: ReturnType<typeof createZhipuProvider>;
   dashscope: ReturnType<typeof createDashScopeProvider>;
+  ai21: ReturnType<typeof createAi21Provider>;
+  upstage: ReturnType<typeof createUpstageProvider>;
+  minimax: ReturnType<typeof createMiniMaxProvider>;
+  lingyi: ReturnType<typeof createLingyiProvider>;
+  sarvam: ReturnType<typeof createSarvamProvider>;
 };
 
 function buildProviders(): ProviderInstances {
@@ -1088,6 +1337,11 @@ function buildProviders(): ProviderInstances {
     moonshot: createMoonshotProvider(),
     zhipu: createZhipuProvider(),
     dashscope: createDashScopeProvider(),
+    ai21: createAi21Provider(),
+    upstage: createUpstageProvider(),
+    minimax: createMiniMaxProvider(),
+    lingyi: createLingyiProvider(),
+    sarvam: createSarvamProvider(),
   };
 }
 
@@ -1197,9 +1451,11 @@ export function getModels(): LanguageModel[] {
  *  speed, then the Gemini Lite models, then the cheapest allowances —
  *  Cloudflare (300 RPM), Zhipu GLM-4.5-Air, SiliconFlow Qwen3-8B,
  *  DashScope Qwen3-8B — then Cerebras, HF, OpenRouter's most reliable
- *  free model + router, NVIDIA, Cohere, Novita, Pollinations (no key),
- *  GitHub Models (unverified, last). AIML, Moonshot, SambaNova and
- *  DeepSeek were REMOVED from this list 2026-11-27 (billing-dead). */
+ *  free model + router, NVIDIA, then the five 2026-11-28 additions
+ *  (AI21, Upstage, MiniMax, 01.AI, Sarvam), Cohere, Novita,
+ *  Pollinations (no key), GitHub Models (unverified, last). AIML,
+ *  Moonshot, SambaNova and DeepSeek were REMOVED from this list
+ *  2026-11-27 (billing-dead). */
 export function getLiteModels(): LanguageModel[] {
   // Same provider priority as chat (fastest/cheapest first), with the
   // live providers first. Pollinations sits second, right after
@@ -1223,6 +1479,11 @@ export function getLiteModels(): LanguageModel[] {
       ["openrouter", "nvidia/nemotron-3.5-super-vl:free"],
       ["openrouter", "openrouter/free"],
       ["nvidia", "openai/gpt-oss-120b"],
+      ["ai21", "jamba-mini-2"],
+      ["upstage", "solar-pro4"],
+      ["minimax", "MiniMax-M2.7"],
+      ["lingyi", "yi-lightning"],
+      ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
     buildProviders()
@@ -1394,7 +1655,7 @@ export function isTimeoutError(err: unknown): boolean {
 }
 
 export const MISSING_KEY_MESSAGE =
-  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu, Qwen/DashScope, or a GitHub token) to the environment to generate content — Pollinations (no key) is always in the chain as a safety net.";
+  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu, Qwen/DashScope, AI21, Upstage, MiniMax, 01.AI, Sarvam, or a GitHub token) to the environment to generate content — Pollinations (no key) is always in the chain as a safety net.";
 
 export const OVERLOADED_MESSAGE =
   "All AI providers are busy / out of free calls right now — try again later";

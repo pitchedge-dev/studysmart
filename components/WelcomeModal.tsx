@@ -14,7 +14,8 @@ import MeetYourBots from "./MeetYourBots";
  * "How it is powered", stated honestly from lib/providers.ts: every guide
  * is generated fresh by AI the moment you ask — nothing here is premade.
  * Google Gemini answers first, and Groq, OpenRouter, Cerebras, NVIDIA,
- * Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu and Qwen
+ * Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu, Qwen,
+ * AI21, Upstage, MiniMax, 01.AI and Sarvam
  * are wired in as free backup providers, plus Pollinations — which needs
  * no key at all and is tried early in the chain as a safety net — so if
  * one is busy or out of free calls another one takes over. (Which of
@@ -120,7 +121,8 @@ export default function WelcomeModal({
               Every guide is generated fresh by AI the moment you ask — nothing
               here is premade. Google Gemini answers first, and Groq,
               OpenRouter, Cerebras, NVIDIA, Cohere, Cloudflare,
-              Novita, SiliconFlow, Hugging Face, Zhipu and Qwen are
+              Novita, SiliconFlow, Hugging Face, Zhipu, Qwen, AI21,
+              Upstage, MiniMax, 01.AI and Sarvam are
               wired in as free backup providers, plus Pollinations —
               which needs no key at all and is tried early in the chain
               as a safety net. If one is busy or out of free calls,
