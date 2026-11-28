@@ -55,6 +55,12 @@ import {
   type StudyGuideRow,
 } from "@/lib/supabase";
 import { initialsFor } from "@/lib/friends";
+import {
+  buildGroupGuideSnapshot,
+  listMyGroups,
+  shareGuideToGroup,
+  type GroupChatSummary,
+} from "@/lib/groupChats";
 import type { GameData } from "./BattleArena";
 import type { FriendEntry } from "./Friends";
 import type { GenerateResult } from "@/app/page";
@@ -155,6 +161,9 @@ export default function YourGuides({
   const [sendFor, setSendFor] = useState<StudyGuideRow | null>(null);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
+  /** Group chats the guide can be sent to (loaded when the send panel opens). */
+  const [sendGroups, setSendGroups] = useState<GroupChatSummary[]>([]);
+  const [sendingGroup, setSendingGroup] = useState(false);
   /** Filter text for the friend picker when the friend list is long. */
   const [sendFilter, setSendFilter] = useState("");
   /** Author/sender ids a friend request was just sent to. */
@@ -528,6 +537,46 @@ export default function YourGuides({
         ? `Sent to @${friend.profile.username}.`
         : "Guide sent to your friend — only they can see it.";
       setNotice(handle);
+      setSendFor(null);
+      setSendTo("");
+      setSendFilter("");
+      refresh();
+    } else {
+      setNotice("Could not send that guide. Try again.");
+    }
+  }
+
+  /** Load my group chats when the send panel opens, so the guide can
+   *  go to a whole group at once (one message, visible to all members). */
+  useEffect(() => {
+    if (!sendFor || !user) return;
+    let cancelled = false;
+    listMyGroups(user.id).then((g) => {
+      if (!cancelled) setSendGroups(g);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendFor?.id]);
+
+  async function doSendToGroup(groupId: string) {
+    if (!sendFor || !user) return;
+    setSendingGroup(true);
+    const ok = await shareGuideToGroup({
+      groupId,
+      senderId: user.id,
+      guideId: sendFor.id,
+      snapshot: buildGroupGuideSnapshot(sendFor),
+    });
+    setSendingGroup(false);
+    if (ok) {
+      const group = sendGroups.find((g) => g.group.id === groupId);
+      setNotice(
+        group
+          ? `Sent to the group "${group.group.name}".`
+          : "Guide sent to the group — only its members can see it."
+      );
       setSendFor(null);
       setSendTo("");
       setSendFilter("");
@@ -1127,6 +1176,30 @@ export default function YourGuides({
                         >
                           Cancel
                         </button>
+                      </div>
+                    </div>
+                  )}
+                  {sendGroups.length > 0 && (
+                    <div className="mt-3 border-t border-brand-100 pt-3">
+                      <p className="text-sm font-bold text-ink-900">
+                        Or send to a group chat
+                      </p>
+                      <p className="text-xs font-medium text-ink-500">
+                        One message — everyone in the group can see it.
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {sendGroups.map((g) => (
+                          <button
+                            key={g.group.id}
+                            type="button"
+                            onClick={() => void doSendToGroup(g.group.id)}
+                            disabled={sendingGroup}
+                            className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white py-1.5 pl-2 pr-3 text-sm font-semibold text-ink-800 shadow-sm transition hover:border-brand-400 hover:bg-brand-50 disabled:opacity-60"
+                          >
+                            <Users className="h-4 w-4 text-brand-600" />
+                            {g.group.name} ({g.memberCount})
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}

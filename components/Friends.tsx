@@ -27,6 +27,7 @@ import {
   loadOpenedAuthorIds,
   searchProfilesByUsername,
 } from "@/lib/friends";
+import GroupChats from "./GroupChats";
 
 export type FriendEntry = {
   friendshipId: string;
@@ -140,6 +141,12 @@ export default function Friends({
       row.requester_id === user.id ? row.addressee_id : row.requester_id;
     return profiles[otherId] ?? null;
   }
+
+  /** Accepted friends as FriendEntry rows — what GroupChats picks from. */
+  const acceptedEntries: FriendEntry[] = accepted.map((row) => ({
+    friendshipId: row.id,
+    profile: otherProfile(row),
+  }));
 
   /** One-tap add from any result/suggestion row. Requests still need
    *  the other person to accept — this only makes finding them easy. */
@@ -474,6 +481,10 @@ export default function Friends({
             );
           })}
         </div>
+      </div>
+
+      <div className="mt-6 border-t border-ink-100 pt-5">
+        <GroupChats user={user} friends={acceptedEntries} />
       </div>
     </div>
   );
