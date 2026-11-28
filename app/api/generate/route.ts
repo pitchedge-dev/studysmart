@@ -526,7 +526,11 @@ export async function POST(req: NextRequest) {
     // the chain (Pollinations' free tier allows 1 reply per 45s per
     // IP, so a same-model retry seconds later almost always fails;
     // see lib/repairModel.ts). Null means no repair — the original
-    // is kept, exactly as when a repair fails.
+    // is kept, exactly as when a repair fails. The repair is also
+    // skipped when the model that would run it is Cohere (it has
+    // timed out on every full-shape attempt in the live logs, so a
+    // repair there burns ~15s and never lands — see
+    // lib/repairModel.ts, 2026-11-28 SPEED RULE).
     const repairModel = selectRepairModel(models, modelUsed);
     if (
       problemCount > 0 &&

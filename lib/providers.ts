@@ -516,9 +516,11 @@ export const DASHSCOPE_VISION_MODEL = "qwen2.5-vl-72b-instruct";
 // providers. Their definitions and env-key gating stay (see the
 // provider list above), so re-adding one is a one-line change per
 // chain. Pollinations
-// (no key) sits SECOND in every text chain, right after the primary:
-// it is the only provider that works with zero keys set, so it must
-// be tried while time remains, not after the wall is nearly gone.
+// (no key) sits SECOND in every text chain except guides, where
+// Groq 120b (key-gated) sits second and Pollinations is effectively
+// second until a Groq key is set: Pollinations is the only provider
+// that works with zero keys set, so it must be tried while time
+// remains, not after the wall is nearly gone.
 // After the live providers come the no-key providers in their old
 // relative order (skipped silently until a key is set), then GitHub
 // Models (unverified, key-gated).
@@ -556,24 +558,32 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // Long structured output (guide Markdown + quiz JSON, big schema).
     // Provider priority (grouped — resolveSpecs interleaves it):
     // Gemini first (proven in this app, 1M context, strong structured
-    // output), then the no-key safety net Pollinations SECOND (the
-    // 16:52 outage proved a fallback that is never reached cannot
-    // save a request), Cohere, then GitHub Models (unverified,
-    // key-gated), then the no-key providers in their old relative
-    // order (NVIDIA Nemotron 3 Ultra, OpenRouter, Zhipu GLM-4.5,
-    // DashScope Qwen-Plus, Groq, SiliconFlow, Hugging Face,
-    // Cloudflare, Cerebras, Novita). Moonshot, AIML, SambaNova and
-    // DeepSeek were REMOVED from this chain 2026-11-27 (billing-dead
-    // — free credits exhausted / card required, Vercel logs
-    // 2026-11-26/27); their definitions stay in this file, so
-    // re-adding one is a one-line change. Resolved with the keys
-    // live in Vercel (Gemini + Cohere), the try order is: Gemini 3.8
-    // → Pollinations → Cohere → Gemini 3.6 → Gemini 3.5-lite →
-    // Gemini 3.1-lite (GitHub Models slots in after Cohere once
-    // GITHUB_TOKEN is set; the no-key providers' models interleave
-    // in round one if their keys are ever set).
+    // output), then Groq 120b SECOND (key-gated, 2026-11-28 SPEED
+    // TARGET: under 30s — Groq runs ~1,000 tok/s, so when Gemini
+    // fails it can serve a FULL guide in ~5-10s, where Pollinations
+    // only serves the thin compact guide; Groq gets the FULL prompt,
+    // not the compact Pollinations prompt. Until GROQ_API_KEY is set
+    // Groq is skipped and Pollinations is effectively second, exactly
+    // as before), then the no-key safety net Pollinations (the 16:52
+    // outage proved a fallback that is never reached cannot save a
+    // request), Cohere, then GitHub Models (unverified, key-gated),
+    // then the no-key providers in their old relative order (NVIDIA
+    // Nemotron 3 Ultra, OpenRouter, Zhipu GLM-4.5, DashScope
+    // Qwen-Plus, Groq 20b, SiliconFlow, Hugging Face, Cloudflare,
+    // Cerebras, Novita). Moonshot, AIML, SambaNova and DeepSeek were
+    // REMOVED from this chain 2026-11-27 (billing-dead — free credits
+    // exhausted / card required, Vercel logs 2026-11-26/27); their
+    // definitions stay in this file, so re-adding one is a one-line
+    // change. Resolved with the keys live in Vercel (Gemini +
+    // Cohere), the try order is: Gemini 3.8 → Pollinations → Cohere
+    // → Gemini 3.6 → Gemini 3.5-lite → Gemini 3.1-lite (GitHub
+    // Models slots in after Cohere once GITHUB_TOKEN is set; Groq
+    // 120b slots in SECOND once GROQ_API_KEY is set — the retry is
+    // pending, parent handles the signup; the no-key providers'
+    // models interleave in round one if their keys are ever set).
     guides: [
       ["google", "gemini-3.8-flash"],
+      ["groq", "openai/gpt-oss-120b"],
       ["google", "gemini-3.6-flash"],
       ["google", "gemini-3.5-flash-lite"],
       ["google", "gemini-3.1-flash-lite"],
@@ -585,7 +595,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["openrouter", "openrouter/free"],
       ["zhipu", "glm-4.5"],
       ["dashscope", "qwen-plus"],
-      ["groq", "openai/gpt-oss-120b"],
       ["groq", "openai/gpt-oss-20b"],
       ["siliconflow", "deepseek-ai/DeepSeek-V3.2"],
       ["huggingface", "Qwen/Qwen2.5-72B-Instruct"],
