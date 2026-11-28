@@ -92,6 +92,12 @@ import WhyWrongList, { type WhyWrongEntryLike } from "@/components/WhyWrongList"
 import ProgressDashboard from "@/components/ProgressDashboard";
 import GuideNavBar, { type GuideNavSection } from "@/components/GuideNavBar";
 import FeedbackModal from "@/components/FeedbackModal";
+import GeneratingPopup, {
+  type GeneratingStage,
+  shouldShowGeneratingPill,
+  shouldShowGeneratingPopup,
+  formatElapsed,
+} from "@/components/GeneratingPopup";
 import WelcomeModal, { hasSeenWelcome } from "@/components/WelcomeModal";
 import MeetYourBots from "@/components/MeetYourBots";
 import {
@@ -225,6 +231,29 @@ export default function Home() {
   // standard depth. Scales how deep the generated guide is.
   const [studyHours, setStudyHours] = useState("");
   const [loading, setLoading] = useState(false);
+  // "Generating" popup state — the popup explains the wait while a
+  // guide is being built. `generatingStage` advances only on real
+  // milestones the frontend knows (see components/GeneratingPopup.tsx):
+  // the /api/generate request is in flight ("providers"), the response
+  // arrived ("checking"), the background enrich pass started
+  // ("finishing"). Hiding the popup never cancels the request — the
+  // guide still appears when it is done.
+  const [generatingStage, setGeneratingStage] =
+    useState<GeneratingStage>("providers");
+  const [generatingStartedAt, setGeneratingStartedAt] = useState<
+    number | null
+  >(null);
+  const [generatingElapsedMs, setGeneratingElapsedMs] = useState(0);
+  const [generatingPopupHidden, setGeneratingPopupHidden] = useState(false);
+  // Elapsed-time ticker for the popup (and its reopen pill): one
+  // interval while generation runs, stopped the moment it ends.
+  useEffect(() => {
+    if (!loading || generatingStartedAt === null) return;
+    const tick = () => setGeneratingElapsedMs(Date.now() - generatingStartedAt);
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [loading, generatingStartedAt]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [section, setSection] = useState<Section>("generate");
@@ -906,6 +935,13 @@ export default function Home() {
     if ((!notes && images.length === 0) || loading) return;
     setError(null);
     setLoading(true);
+    // "Generating" popup: a fresh run starts at the first stage, with
+    // a fresh clock, and the popup visible again even if the last run
+    // was hidden.
+    setGeneratingStage("providers");
+    setGeneratingStartedAt(Date.now());
+    setGeneratingElapsedMs(0);
+    setGeneratingPopupHidden(false);
     setResult(null);
     setSaveNote(null);
     setSavedGuideId(null);
@@ -929,6 +965,10 @@ export default function Home() {
           data.detail ? `${data.error || "Failed to generate study material."} (${data.detail})` : data.error || "Failed to generate study material."
         );
       const generated = data as GenerateResult;
+      // "Generating" popup: the core guide arrived — the request is no
+      // longer waiting on providers; the guide is now being checked
+      // (and saved, when signed in) before it is shown.
+      setGeneratingStage("checking");
       setResult(generated);
       setAnswers({});
       setPracticeProgress({ answered: 0, correct: 0 });
@@ -1001,6 +1041,11 @@ export default function Home() {
         savedId,
         generation,
       });
+      // "Generating" popup: the finishing-sections pass has started in
+      // the background. The popup closes with `loading` in the finally
+      // below and the guide appears; the sections keep arriving with
+      // their own inline status in the guide view.
+      setGeneratingStage("finishing");
       setAnswers({});
       setPracticeProgress({ answered: 0, correct: 0 });
       setCheckpointByModule({});
@@ -2977,6 +3022,43 @@ export default function Home() {
         style={style}
         onStyleChange={setStyle}
       />
+
+      {/* "Generating" popup: shown only while a guide is being built
+          (loading) and not hidden. Hiding never cancels the request —
+          the guide still appears when it is done. On failure `loading`
+          goes false in generate()'s finally, so the popup closes and
+          the existing error message shows exactly as before. */}
+      {section === "generate" &&
+        shouldShowGeneratingPopup({
+          loading,
+          hidden: generatingPopupHidden,
+        }) && (
+          <GeneratingPopup
+            stage={generatingStage}
+            elapsedMs={generatingElapsedMs}
+            topic={inputText.trim() || undefined}
+            onHide={() => setGeneratingPopupHidden(true)}
+          />
+        )}
+
+      {/* Reopen pill while the popup is hidden and generation is still
+          running — the visible status that brings the popup back. */}
+      {section === "generate" &&
+        shouldShowGeneratingPill({
+          loading,
+          hidden: generatingPopupHidden,
+        }) && (
+          <button
+            type="button"
+            onClick={() => setGeneratingPopupHidden(false)}
+            className="fixed bottom-24 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-ink-900 px-4 py-2.5 text-sm font-bold text-white shadow-lift transition hover:bg-ink-800"
+            aria-label={`Show generation progress, ${formatElapsed(generatingElapsedMs)} so far`}
+          >
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Building your guide… {formatElapsed(generatingElapsedMs)} — show
+            progress
+          </button>
+        )}
 
       {showBackToTop && (
         <button
