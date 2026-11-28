@@ -26,10 +26,10 @@ import type { LanguageModel } from "ai";
  * and lite templates, strictest JSON for practice/games, vision-only
  * for check-reasoning), instead of one shared fallback order.
  *
- * 2026-11-28 — five MORE fallbacks from the same hunt shortlist,
+ * 2026-11-28 — four MORE fallbacks from the same hunt shortlist,
  * wired key-gated (fix-more-fallbacks): AI21 Labs (Jamba Mini 2),
- * Upstage (Solar Pro 4), MiniMax (MiniMax-M2.7), 01.AI / Yi
- * (yi-lightning) and Sarvam AI (sarvam-105b). All five are TEXT-ONLY
+ * Upstage (Solar Pro 4), MiniMax (MiniMax-M2.7) and Sarvam AI
+ * (sarvam-105b). All four are TEXT-ONLY
  * (no verified vision model for any of them), so none is in the
  * reasoning chain. All five sit AFTER the live providers and BEFORE
  * Novita in every text chain and in getLiteModels, so with no key set
@@ -222,13 +222,7 @@ import type { LanguageModel } from "ai";
  *     the reasoning chain. CAVEAT: one source says trial credits are
  *     "tied to phone or email verification" — if signup needs phone
  *     verification, skip this provider.
- * 23. 01.AI / Yi (Lingyi Wanwu) — ¥10 free credits on signup, 5 RPM.
- *     OpenAI-compatible. Base URL is https://api.lingyiwanwu.com/v1
- *     (the current platform endpoint — the older https://api.01.ai/v1
- *     in Apr 2026 guides is legacy). Yi-Lightning for text.
- *     Text-only — NOT in the reasoning chain. Signup by email or
- *     phone; international phone numbers reportedly work.
- * 24. Sarvam AI — ₹100 free credits on signup, never expire, no card.
+ * 23. Sarvam AI — ₹100 free credits on signup, never expire, no card.
  *     OpenAI-compatible. Base URL is https://api.sarvam.ai/v1 for
  *     sarvam-105b — /v1 serves ONLY sarvam-105b and
  *     sarvam-105b-conversations; /v2 (Token Factory) is for re-served
@@ -237,6 +231,10 @@ import type { LanguageModel } from "ai";
  *     for text. Text-only — NOT in the reasoning chain.
  *
  * REJECTED 2026-11-28 (do not add — hunt shortlist, fully resolved):
+ * 01.AI / Yi — platform discontinued new registrations 2026-08-03
+ *     and its public API service ended 2026-09-03; sign-in is
+ *     phone-only, so no free key can ever be created (verified
+ *     2026-11-28; was briefly wired key-gated, then removed entirely),
  * Nebius AI Studio ($1 trial credit requires a card to claim),
  * Hyperbolic (inference needs a $5 deposit, or phone verification
  * for the $1 credit — free tier cannot use inference), FriendliAI
@@ -588,18 +586,6 @@ export const UPSTAGE_TEXT_MODEL = "solar-pro4";
 export const MINIMAX_TEXT_MODEL = "MiniMax-M2.7";
 
 // ---------------------------------------------------------------------------
-// 01.AI / Yi (Lingyi Wanwu) — ¥10 free credits on signup, 5 RPM.
-// OpenAI-compatible. Base URL https://api.lingyiwanwu.com/v1 is the
-// current platform endpoint (multiple Nov 2026 sources; the older
-// https://api.01.ai/v1 in Apr 2026 guides is legacy). Yi-Lightning
-// is the flagship text model. Text-only — no vision model verified
-// for this chain, so NOT in the reasoning chain. Signup by
-// email or phone; international phone numbers reportedly work.
-// ---------------------------------------------------------------------------
-
-export const LINGYI_TEXT_MODEL = "yi-lightning";
-
-// ---------------------------------------------------------------------------
 // Sarvam AI — ₹100 free credits on signup, never expire, no card.
 // OpenAI-compatible. Base URL https://api.sarvam.ai/v1 serves ONLY
 // sarvam-105b and sarvam-105b-conversations (LiteLLM + a 2026-10-19
@@ -649,8 +635,8 @@ export const SARVAM_TEXT_MODEL = "sarvam-105b";
 // remains, not after the wall is nearly gone.
 // After the live providers come the key-gated providers in their old
 // relative order (skipped silently until a key is set — GitHub Models
-// among them, after Cohere), then the five 2026-11-28 additions
-// (AI21, Upstage, MiniMax, 01.AI, Sarvam — text-only, key-gated),
+// among them, after Cohere), then the four 2026-11-28 additions
+// (AI21, Upstage, MiniMax, Sarvam — text-only, key-gated),
 // then Novita LAST in every text chain.
 //
 // The lists are NOT the try order: resolveSpecs() interleaves them
@@ -682,7 +668,6 @@ type ProviderKind =
   | "ai21"
   | "upstage"
   | "minimax"
-  | "lingyi"
   | "sarvam"
 type ModelSpec = readonly [ProviderKind, string];
 
@@ -703,8 +688,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // then the no-key providers in their old relative order (NVIDIA
     // Nemotron 3 Ultra, OpenRouter, Zhipu GLM-4.5, DashScope
     // Qwen-Plus, Groq 20b, SiliconFlow, Hugging Face, Cloudflare,
-    // Cerebras, then the five 2026-11-28 additions — AI21 Jamba Mini 2,
-    // Upstage Solar Pro 4, MiniMax-M2.7, 01.AI Yi-Lightning, Sarvam
+    // Cerebras, then the four 2026-11-28 additions — AI21 Jamba Mini 2,
+    // Upstage Solar Pro 4, MiniMax-M2.7, Sarvam
     // 105B — then Novita last). Moonshot, AIML, SambaNova and DeepSeek were
     // REMOVED from this chain 2026-11-27 (billing-dead — free credits
     // exhausted / card required, Vercel logs 2026-11-26/27); their
@@ -738,7 +723,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["ai21", "jamba-mini-2"],
       ["upstage", "solar-pro4"],
       ["minimax", "MiniMax-M2.7"],
-      ["lingyi", "yi-lightning"],
       ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
@@ -748,8 +732,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // GitHub Models, then the fast/cheap small models and the rest
     // in their old relative order (Zhipu Air, SiliconFlow Qwen3-8B,
     // DashScope Qwen3-8B, Cerebras, Cloudflare, OpenRouter, NVIDIA,
-    // Hugging Face, then the five 2026-11-28 additions — AI21, Upstage,
-    // MiniMax, 01.AI, Sarvam — then Novita last). Moonshot, AIML, SambaNova and DeepSeek
+    // Hugging Face, then the four 2026-11-28 additions — AI21, Upstage,
+    // MiniMax, Sarvam — then Novita last). Moonshot, AIML, SambaNova and DeepSeek
     // were REMOVED from this chain 2026-11-27 (billing-dead).
     chat: [
       ["groq", "openai/gpt-oss-20b"],
@@ -773,7 +757,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["ai21", "jamba-mini-2"],
       ["upstage", "solar-pro4"],
       ["minimax", "MiniMax-M2.7"],
-      ["lingyi", "yi-lightning"],
       ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
@@ -784,7 +767,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // Cohere, GitHub Models, then the rest in their old relative
     // order (OpenRouter Super VL, Zhipu Air, SiliconFlow Qwen3-8B,
     // Cerebras, NVIDIA, DashScope, Cloudflare, Hugging Face, then the
-    // five 2026-11-28 additions — AI21, Upstage, MiniMax, 01.AI,
+    // four 2026-11-28 additions — AI21, Upstage, MiniMax,
     // Sarvam — then Novita last).
     // Moonshot, AIML, SambaNova and DeepSeek were REMOVED from this
     // chain 2026-11-27 (billing-dead).
@@ -809,7 +792,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["ai21", "jamba-mini-2"],
       ["upstage", "solar-pro4"],
       ["minimax", "MiniMax-M2.7"],
-      ["lingyi", "yi-lightning"],
       ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
@@ -820,7 +802,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // their old relative order (Groq 120b strict JSON, OpenRouter
     // Super VL, NVIDIA Nemotron 3 Ultra, Zhipu, DashScope,
     // SiliconFlow, HF, Cloudflare, Cerebras, then the five 2026-11-28
-    // additions — AI21, Upstage, MiniMax, 01.AI, Sarvam — then Novita
+    // additions — AI21, Upstage, MiniMax, Sarvam — then Novita
     // last). Moonshot,
     // AIML, SambaNova and DeepSeek were REMOVED from this chain
     // 2026-11-27 (billing-dead).
@@ -844,7 +826,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["ai21", "jamba-mini-2"],
       ["upstage", "solar-pro4"],
       ["minimax", "MiniMax-M2.7"],
-      ["lingyi", "yi-lightning"],
       ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
@@ -857,7 +838,7 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // a fake video. Then Cohere, GitHub Models, then the rest in
     // their old relative order (Groq, OpenRouter, NVIDIA, Zhipu,
     // DashScope, SiliconFlow, HF, Cerebras, then the five 2026-11-28
-    // additions — AI21, Upstage, MiniMax, 01.AI, Sarvam — then Novita
+    // additions — AI21, Upstage, MiniMax, Sarvam — then Novita
     // last). Moonshot, AIML,
     // SambaNova and DeepSeek were REMOVED from this chain 2026-11-27
     // (billing-dead).
@@ -881,7 +862,6 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
       ["ai21", "jamba-mini-2"],
       ["upstage", "solar-pro4"],
       ["minimax", "MiniMax-M2.7"],
-      ["lingyi", "yi-lightning"],
       ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
@@ -896,8 +876,8 @@ export const CATEGORY_SPECS: Record<GenerationCategory, readonly ModelSpec[]> =
     // multimodal + JSON mode, 450 tok/s; HF Llama 3.2 11B Vision;
     // Cerebras Gemma 4 31B; Cloudflare Llama 3.2 11B Vision).
     // (DeepSeek and Novita have no reliable vision model, so they are
-    // not in this chain, and neither do the five 2026-11-28 additions
-    // — AI21, Upstage, MiniMax, 01.AI, Sarvam are all text-only, so
+    // not in this chain, and neither do the four 2026-11-28 additions
+    // — AI21, Upstage, MiniMax, Sarvam are all text-only, so
     // none is in this chain. AIML, Moonshot and SambaNova were REMOVED
     // 2026-11-27 — billing-dead, free credits exhausted / card
     // required — so this chain is 12 vision providers, 14 models.)
@@ -945,7 +925,6 @@ export const CATEGORY_ROUTING: Record<
       "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
       "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
       "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
-      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
       "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
@@ -968,7 +947,6 @@ export const CATEGORY_ROUTING: Record<
       "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
       "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
       "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
-      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
       "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
@@ -991,7 +969,6 @@ export const CATEGORY_ROUTING: Record<
       "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
       "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
       "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
-      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
       "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
@@ -1014,7 +991,6 @@ export const CATEGORY_ROUTING: Record<
       "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
       "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
       "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
-      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
       "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
@@ -1037,7 +1013,6 @@ export const CATEGORY_ROUTING: Record<
       "AI21 (Jamba Mini 2, needs AI21_API_KEY)",
       "Upstage (Solar Pro 4, needs UPSTAGE_API_KEY)",
       "MiniMax (MiniMax-M2.7, needs MINIMAX_API_KEY)",
-      "01.AI (Yi-Lightning, needs LINGYI_API_KEY)",
       "Sarvam (sarvam-105b, needs SARVAM_API_KEY)",
       "Novita (gpt-oss-120b, $1 credit)",
     ],
@@ -1268,17 +1243,6 @@ function createMiniMaxProvider() {
   });
 }
 
-function createLingyiProvider() {
-  // 01.AI / Yi — base URL is api.lingyiwanwu.com/v1 (current platform
-  // endpoint); the older api.01.ai/v1 in Apr 2026 guides is legacy.
-  const apiKey = process.env.LINGYI_API_KEY;
-  if (!apiKey) return null;
-  return createOpenAI({
-    apiKey,
-    baseURL: "https://api.lingyiwanwu.com/v1",
-  });
-}
-
 function createSarvamProvider() {
   // Sarvam — /v1 serves ONLY sarvam-105b and sarvam-105b-conversations;
   // /v2 (Token Factory) is for re-served open-weight models and is
@@ -1313,7 +1277,6 @@ type ProviderInstances = {
   ai21: ReturnType<typeof createAi21Provider>;
   upstage: ReturnType<typeof createUpstageProvider>;
   minimax: ReturnType<typeof createMiniMaxProvider>;
-  lingyi: ReturnType<typeof createLingyiProvider>;
   sarvam: ReturnType<typeof createSarvamProvider>;
 };
 
@@ -1340,7 +1303,6 @@ function buildProviders(): ProviderInstances {
     ai21: createAi21Provider(),
     upstage: createUpstageProvider(),
     minimax: createMiniMaxProvider(),
-    lingyi: createLingyiProvider(),
     sarvam: createSarvamProvider(),
   };
 }
@@ -1451,8 +1413,8 @@ export function getModels(): LanguageModel[] {
  *  speed, then the Gemini Lite models, then the cheapest allowances —
  *  Cloudflare (300 RPM), Zhipu GLM-4.5-Air, SiliconFlow Qwen3-8B,
  *  DashScope Qwen3-8B — then Cerebras, HF, OpenRouter's most reliable
- *  free model + router, NVIDIA, then the five 2026-11-28 additions
- *  (AI21, Upstage, MiniMax, 01.AI, Sarvam), Cohere, Novita,
+ *  free model + router, NVIDIA, then the four 2026-11-28 additions
+ *  (AI21, Upstage, MiniMax, Sarvam), Cohere, Novita,
  *  Pollinations (no key), GitHub Models (unverified, last). AIML,
  *  Moonshot, SambaNova and DeepSeek were REMOVED from this list
  *  2026-11-27 (billing-dead). */
@@ -1482,7 +1444,6 @@ export function getLiteModels(): LanguageModel[] {
       ["ai21", "jamba-mini-2"],
       ["upstage", "solar-pro4"],
       ["minimax", "MiniMax-M2.7"],
-      ["lingyi", "yi-lightning"],
       ["sarvam", "sarvam-105b"],
       ["novita", "openai/gpt-oss-120b"],
     ],
@@ -1655,7 +1616,7 @@ export function isTimeoutError(err: unknown): boolean {
 }
 
 export const MISSING_KEY_MESSAGE =
-  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu, Qwen/DashScope, AI21, Upstage, MiniMax, 01.AI, Sarvam, or a GitHub token) to the environment to generate content — Pollinations (no key) is always in the chain as a safety net.";
+  "No AI provider key is configured. Add a free key (Google AI Studio, Groq, OpenRouter, Cerebras, NVIDIA NIM, Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu, Qwen/DashScope, AI21, Upstage, MiniMax, Sarvam, or a GitHub token) to the environment to generate content — Pollinations (no key) is always in the chain as a safety net.";
 
 export const OVERLOADED_MESSAGE =
   "All AI providers are busy / out of free calls right now — try again later";

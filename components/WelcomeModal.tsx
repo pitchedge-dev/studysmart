@@ -15,7 +15,7 @@ import MeetYourBots from "./MeetYourBots";
  * is generated fresh by AI the moment you ask — nothing here is premade.
  * Google Gemini answers first, and Groq, OpenRouter, Cerebras, NVIDIA,
  * Cohere, Cloudflare, Novita, SiliconFlow, Hugging Face, Zhipu, Qwen,
- * AI21, Upstage, MiniMax, 01.AI and Sarvam
+ * AI21, Upstage, MiniMax and Sarvam
  * are wired in as free backup providers, plus Pollinations — which needs
  * no key at all and is tried early in the chain as a safety net — so if
  * one is busy or out of free calls another one takes over. (Which of
@@ -122,7 +122,7 @@ export default function WelcomeModal({
               here is premade. Google Gemini answers first, and Groq,
               OpenRouter, Cerebras, NVIDIA, Cohere, Cloudflare,
               Novita, SiliconFlow, Hugging Face, Zhipu, Qwen, AI21,
-              Upstage, MiniMax, 01.AI and Sarvam are
+              Upstage, MiniMax and Sarvam are
               wired in as free backup providers, plus Pollinations —
               which needs no key at all and is tried early in the chain
               as a safety net. If one is busy or out of free calls,
