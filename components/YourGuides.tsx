@@ -172,6 +172,12 @@ export default function YourGuides({
   const [renamingCourse, setRenamingCourse] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [confirmDeleteCourse, setConfirmDeleteCourse] = useState<string | null>(null);
+  /** Guide awaiting delete confirmation (id) — deleting a guide used
+   *  to be one click with no confirmation (live 2026-11-27), so a
+   *  stray tap removed a guide immediately. Same two-step inline
+   *  pattern as course deletion above: the first tap arms the
+   *  confirm, only "Yes, delete" calls deleteGuide. */
+  const [confirmDeleteGuide, setConfirmDeleteGuide] = useState<string | null>(null);
 
   /** Every course the user has: named on a guide, or created and waiting
    *  for its first guide. Sorted A–Z, first-seen casing kept. */
@@ -905,16 +911,40 @@ export default function YourGuides({
                 >
                   <Folder className="h-4 w-4" /> Course
                 </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await deleteGuide(row.id);
-                    refresh();
-                  }}
-                  className="btn-ghost text-rose-600 hover:bg-rose-50"
-                >
-                  <Trash2 className="h-4 w-4" /> Delete
-                </button>
+                {confirmDeleteGuide === row.id ? (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-rose-700">
+                      Delete this guide? It cannot be undone.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await deleteGuide(row.id);
+                        setConfirmDeleteGuide(null);
+                        refresh();
+                      }}
+                      className="rounded-xl px-2 py-1 text-xs font-bold text-white"
+                      style={{ backgroundColor: "#dc2626" }}
+                    >
+                      Yes, delete
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteGuide(null)}
+                      className="btn-ghost px-2 py-1 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteGuide(row.id)}
+                    className="btn-ghost text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete
+                  </button>
+                )}
               </div>
               {courseMenuFor === row.id && (
                 <div className="mt-3 rounded-xl bg-brand-50/70 p-3 ring-1 ring-inset ring-brand-100">

@@ -68,7 +68,16 @@ export default function GuideVideos({
     if (moduleTitles.length > 0) {
       params.set("modules", moduleTitles.join(","));
     }
-    fetch(`/api/videos?${params.toString()}`)
+    // BOUNDED WAIT (live 2026-11-27: this section sat on "Finding
+    // videos that explain this…" while the tester looked): a bare
+    // fetch() never times out on its own, and the route can take
+    // ~15s when its providers are slow — so the fetch is aborted
+    // after 20s and the catch below falls back to plain YouTube
+    // search links, built client-side. The section always resolves
+    // to verified videos or search links within ~20s, never hangs.
+    fetch(`/api/videos?${params.toString()}`, {
+      signal: AbortSignal.timeout(20000),
+    })
       .then((res) => res.json())
       .then((data: {
         videos?: Video[];

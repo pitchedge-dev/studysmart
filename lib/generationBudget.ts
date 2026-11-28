@@ -68,8 +68,16 @@ export const GENERATE_FULL_ATTEMPT_MS = 20000;
 export const GENERATE_SIMPLE_ATTEMPT_MS = 15000;
 /** The repair pass only starts when the core landed before this. */
 export const GENERATE_REPAIR_AFTER_MS = 30000;
-/** One repair attempt may take at most this long. */
-export const GENERATE_REPAIR_ATTEMPT_MS = 15000;
+/** One repair attempt may take at most this long — 20s, because a
+ *  repair regenerates a FULL guide and a healthy provider needs
+ *  ~15–25s to finish one (see the header comment). The old 15s cap
+ *  could not produce a full repair guide: Vercel logs 2026-11-27
+ *  23:25 (LOG #8) show the repair on Cohere timing out while the
+ *  thin Pollinations original was kept. The wall clock still bounds
+ *  it — attemptTimeoutMs cuts the cap to the wall remaining, and the
+ *  repair only starts when the core landed before 30s, so the
+ *  worst case is 30s + 20s = the 50s wall. */
+export const GENERATE_REPAIR_ATTEMPT_MS = 20000;
 /** Do not start an attempt with less than this much wall clock left
  *  — below this, even the fastest provider cannot answer. Shared by
  *  /api/generate and /api/enrich. */

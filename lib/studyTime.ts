@@ -128,3 +128,32 @@ export function depthFloor(value: string | undefined): {
   const minModules = repairMinModules(value);
   return { minModules, minConcepts: Math.max(3, minModules * 2) };
 }
+
+/**
+ * Honest label for a guide that came back below its session's depth
+ * floor — the case the live 2026-11-27 volcano guide hit: 2 modules
+ * / 4 concepts for a 2-hour session, whose floor is 3 modules / 6
+ * concepts. Returns null when the guide meets its floor, so a guide
+ * that is deep enough shows nothing extra. The label states the real
+ * counts and the floor it missed — it never makes the guide look
+ * deeper than it is, and it never promises depth the guide does not
+ * have. The repair pass and the enrich pass are the routes to a
+ * deeper guide; when both have had their chance and the guide is
+ * still thin, this label is what the student sees, next to the
+ * "Built for a 2-hour session" chip that would otherwise overstate it.
+ */
+export function thinGuideNote(
+  moduleCount: number,
+  conceptCount: number,
+  studyHours: string | undefined
+): string | null {
+  const { minModules, minConcepts } = depthFloor(studyHours);
+  if (moduleCount >= minModules && conceptCount >= minConcepts) return null;
+  const label = studyHoursLabel(studyHours);
+  const session = label ? `a ${label}` : "this session";
+  return (
+    `Compact guide — ${moduleCount} module${moduleCount === 1 ? "" : "s"} · ` +
+    `${conceptCount} concept${conceptCount === 1 ? "" : "s"}, below the ` +
+    `${minModules}-module / ${minConcepts}-concept depth for ${session}.`
+  );
+}

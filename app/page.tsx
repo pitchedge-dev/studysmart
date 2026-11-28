@@ -94,7 +94,11 @@ import GuideNavBar, { type GuideNavSection } from "@/components/GuideNavBar";
 import FeedbackModal from "@/components/FeedbackModal";
 import WelcomeModal, { hasSeenWelcome } from "@/components/WelcomeModal";
 import MeetYourBots from "@/components/MeetYourBots";
-import { STUDY_HOURS_OPTIONS, studyHoursLabel } from "@/lib/studyTime";
+import {
+  STUDY_HOURS_OPTIONS,
+  studyHoursLabel,
+  thinGuideNote,
+} from "@/lib/studyTime";
 import AuthModal from "@/components/AuthModal";
 import YourGuides from "@/components/YourGuides";
 import Browse from "@/components/Browse";
@@ -1148,6 +1152,16 @@ export default function Home() {
 
   const modules = result?.modules ?? [];
 
+  /** Honest thin-guide label (see lib/studyTime.ts thinGuideNote):
+   *  null when the guide meets its session's depth floor. */
+  const thinNote = result
+    ? thinGuideNote(
+        modules.length,
+        modules.reduce((n, m) => n + (m.concepts?.length ?? 0), 0),
+        result.studyHours
+      )
+    : null;
+
   // Sections for the in-guide nav bar (inline view): only the sections
   // this guide actually has, in document order.
   const inlineNavSections: GuideNavSection[] = result
@@ -1982,6 +1996,9 @@ export default function Home() {
                       <span className="chip">
                         Built for a {studyHoursLabel(result.studyHours)}
                       </span>
+                    )}
+                    {thinNote && (
+                      <span className="chip-amber">{thinNote}</span>
                     )}
                   </p>
                 </div>

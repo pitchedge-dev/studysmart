@@ -60,7 +60,7 @@ import PreTest from "./PreTest";
 import TutorPanel from "./TutorPanel";
 import BuilderBot from "./BuilderBot";
 import MeetYourBots from "./MeetYourBots";
-import { studyHoursLabel } from "@/lib/studyTime";
+import { studyHoursLabel, thinGuideNote } from "@/lib/studyTime";
 import {
   buildArenaExportSourceFromResult,
   writePendingArenaExport,
@@ -152,6 +152,13 @@ export default function GuideView({
 }) {
   const modules: StudyModule[] = result.modules ?? [];
   const quiz: QuizQuestion[] = result.quiz ?? [];
+  /** Honest thin-guide label (see lib/studyTime.ts thinGuideNote):
+   *  null when the guide meets its session's depth floor. */
+  const thinNote = thinGuideNote(
+    modules.length,
+    modules.reduce((n, m) => n + (m.concepts?.length ?? 0), 0),
+    result.studyHours
+  );
 
   /** "Given resources" — the materials the teacher gave for this unit
    *  (the files uploaded when the guide was made). Stored in the saved
@@ -819,6 +826,7 @@ export default function GuideView({
               {studyHoursLabel(result.studyHours) && (
                 <span>· Built for a {studyHoursLabel(result.studyHours)}</span>
               )}
+              {thinNote && <span className="chip-amber">{thinNote}</span>}
               <span>· {readingMinutes} min read</span>
             </p>
           </div>

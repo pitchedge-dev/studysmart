@@ -107,6 +107,56 @@ function promisesCalculation(problem: string): boolean {
   );
 }
 
+/**
+ * Units that mark a number as a real measurement from the topic: a
+ * temperature, a distance, a speed, a concentration, a scale value,
+ * a time span, a percentage. The list is deliberately ordinary
+ * school-topic units — it is a check for "this number measures
+ * something", not a topic list, so it never hardcodes any subject.
+ */
+const TOPIC_UNIT_AFTER_NUMBER_RE =
+  /\d[\d,]*(\.\d+)?\s*(°C|°F|°|%|percent|km\/h|m\/s|km\/s|km²|m²|cm²|km³|m³|cm³|kilomet(?:er|re)s?|met(?:er|re)s?|centimet(?:er|re)s?|millimet(?:er|re)s?|km|cm|mm|m|grams?|kilograms?|milligrams?|kg|mg|µg|g|liters?|litres?|millilit(?:er|re)s?|mL|L|moles?|mol|kPa|Pa|atm|kJ|J|kW|W|V|A|kHz|Hz|dB|pH|VEI|years?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|seconds?|secs?)\b/i;
+
+/** True when the text carries a real topic quantity: a decimal, a
+ *  percentage, a number of 100 or more, or a number with a unit.
+ *  A bare small integer ("3", "5") is not a quantity — it measures
+ *  nothing. */
+export function hasTopicQuantity(text: string): boolean {
+  if (!text) return false;
+  if (/\d+\.\d+/.test(text)) return true; // a decimal, e.g. 28.5, 1.25
+  if (/\d[\d,]*\s*%/.test(text)) return true; // a percentage, e.g. 10%
+  if (/\b\d{3,}\b/.test(text)) return true; // 100 or more, e.g. 500, 2,000
+  if (TOPIC_UNIT_AFTER_NUMBER_RE.test(text)) return true;
+  return false;
+}
+
+/** True when a worked example DOES calculate something but only with
+ *  trivial small-number arithmetic — every number is a bare small
+ *  integer with no unit, no decimal, no percentage, and nothing 100
+ *  or over. The live 2026-11-27 volcano guide did exactly this:
+ *  3+5=8, 7−4=3, 10−4=6 — arithmetic that teaches the topic
+ *  nothing, even though hasCalculation() formally passes it. A
+ *  worked example that measures something in the topic ("24 − 15 =
+ *  9 hours" of daylight, "500 liters × 4 trees") is NOT trivial:
+ *  the unit (or the decimal, or the size) makes it a topic quantity.
+ *  Topicality itself cannot be checked in code — a unit-bearing
+ *  subtraction like "15 − 12 = 3 cm" passes this check and rests on
+ *  the prompt — but bare small-number sums are checkable, and this
+ *  catches them. */
+export function workedExampleIsTrivial(
+  w: WorkedExampleLike | null | undefined
+): boolean {
+  if (!w) return false;
+  const parts: string[] = [];
+  if (typeof w.problem === "string") parts.push(w.problem);
+  if (Array.isArray(w.steps)) {
+    for (const s of w.steps) if (typeof s === "string") parts.push(s);
+  }
+  if (typeof w.answer === "string") parts.push(w.answer);
+  const joined = parts.join(" ");
+  return hasCalculation(joined) && !hasTopicQuantity(joined);
+}
+
 /** Split text into sentences/lines and drop any that are refusal or
  *  placeholder filler. Returns the cleaned text (empty string when
  *  nothing real is left). */
@@ -434,17 +484,23 @@ export function sanitizeGuide<T extends GuideJson>(guide: T): T {
 // ---------------------------------------------------------------------------
 
 /** Count concept worked examples with 2+ steps, and how many of
- *  them actually calculate something. A guide whose worked examples
- *  are all numberless stories fails the numeric rule even though the
- *  step structure looks right — that is exactly what the 2026-11-25
+ *  them actually calculate something — and how many of those
+ *  calculations are trivial small-number arithmetic (see
+ *  workedExampleIsTrivial). A guide whose worked examples are all
+ *  numberless stories fails the numeric rule even though the step
+ *  structure looks right — that is exactly what the 2026-11-25
  *  immune-system guide did (6 concepts, Step 1–3 + Answer, zero
- *  calculations). */
+ *  calculations). A guide whose calculations are all trivial fails
+ *  the same way one step later: the 2026-11-27 volcano guide had
+ *  numbers (3+5=8, 7−4=3, 10−4=6) that taught the topic nothing. */
 function countWorkedExamples(guide: GuideJson): {
   total: number;
   numeric: number;
+  trivial: number;
 } {
   let total = 0;
   let numeric = 0;
+  let trivial = 0;
   for (const m of guide.modules ?? []) {
     for (const c of m.concepts ?? []) {
       const w = (c as { workedExample?: WorkedExampleLike }).workedExample;
@@ -456,11 +512,14 @@ function countWorkedExamples(guide: GuideJson): {
         ).length >= 2
       ) {
         total += 1;
-        if (workedExampleHasCalculation(w)) numeric += 1;
+        if (workedExampleHasCalculation(w)) {
+          numeric += 1;
+          if (workedExampleIsTrivial(w)) trivial += 1;
+        }
       }
     }
   }
-  return { total, numeric };
+  return { total, numeric, trivial };
 }
 
 /** True when the guide has at least one real step-by-step worked
@@ -574,10 +633,22 @@ export function qualityIssues(
     // 2026-11-25 immune-system failure (6 concepts, Step 1–3 +
     // Answer, zero calculations). The repair regenerates the whole
     // guide with the numeric rule named, so one issue covers it.
-    const { total, numeric } = countWorkedExamples(guide);
+    const { total, numeric, trivial } = countWorkedExamples(guide);
     if (total > 0 && numeric === 0) {
       issues.push(
         `none of the ${total} worked example${total === 1 ? "" : "s"} contains a real numeric calculation — every workedExample must show arithmetic with real numbers from the topic (for example 2,000 × 60 = 120,000); a time range ('1–2 weeks'), a vague count ('millions of'), or the word 'Calculate' with no numbers does not count`
+      );
+    } else if (numeric > 0 && trivial > 0 && trivial >= numeric - trivial) {
+      // At least half the calculating examples are trivial bare
+      // small-number sums (3+5=8, 7−4=3): the guide technically
+      // calculates, but the calculations teach the topic nothing.
+      // The repair regenerates the whole guide with the topic-quantity
+      // rule named, so one issue covers it. A guide with a clear
+      // majority of substantive examples (a single weak one among
+      // good ones) does not trigger — the repair would rewrite good
+      // examples to fix one weak one.
+      issues.push(
+        `${trivial} of the ${numeric} worked example${numeric === 1 ? "" : "s"} that calculate${numeric === 1 ? "s" : ""} use only trivial small-number arithmetic (for example 3+5=8) instead of real quantities from the topic — every workedExample must calculate with a measurement, rate, scale, temperature, or other quantity the topic itself uses, with its unit (for example 500 liters × 4 trees = 2,000 liters); bare sums like 3+5=8 do not count`
       );
     }
   }

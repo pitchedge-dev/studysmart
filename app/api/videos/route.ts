@@ -7,6 +7,7 @@ import {
   safeErrorDetail,
 } from "@/lib/gemini";
 import { generateObjectSafe } from "@/lib/safeGenerate";
+import { withDeadline } from "@/lib/withDeadline";
 // The candidate shape lives in lib/routeSchemas.ts (moved there so the
 // strict-schema logic test can import the real definition).
 import { CandidateSchema } from "@/lib/routeSchemas";
@@ -337,6 +338,20 @@ export async function GET(req: NextRequest) {
   // concurrently — the Khan group costs no extra wall time, and a
   // failure in either path still leaves the other (and the search
   // links) standing.
+  //
+  // BOUNDED WAIT (live 2026-11-27: the Videos section sat on
+  // "Finding videos that explain this…" while the tester looked):
+  // each suggestion path can take 20–30s on its own — it walks the
+  // videos chain with a 10s abort per model, and with Gemini
+  // overloaded and Cohere slow those aborts are spent, not saved —
+  // and the route's maxDuration is 30s, so an unlucky lookup
+  // answered only when Vercel killed it. Each path is therefore
+  // raced against a 15s deadline: the route answers within ~15s
+  // with whatever verified (or nothing — the search links still
+  // help), and a late lookup's result is dropped, never awaited.
+  // The client gives the route 20s (see GuideVideos.tsx) so the
+  // server deadline, not a client hang, is what resolves the section.
+  const VIDEOS_OVERALL_TIMEOUT_MS = 15000;
   const generalPromise = (async (): Promise<VerifiedVideo[]> => {
     try {
       if (apiKey) {
@@ -359,7 +374,10 @@ export async function GET(req: NextRequest) {
     console.error("[/api/videos khan] failed:", safeErrorDetail(err));
     return [] as VerifiedVideo[];
   });
-  const [videos, khanVideos] = await Promise.all([generalPromise, khanPromise]);
+  const [videos, khanVideos] = await Promise.all([
+    withDeadline(generalPromise, VIDEOS_OVERALL_TIMEOUT_MS, []),
+    withDeadline(khanPromise, VIDEOS_OVERALL_TIMEOUT_MS, []),
+  ]);
 
   // Never fail the guide over videos: worst case the page shows the
   // YouTube search links, never a fake video entry.
